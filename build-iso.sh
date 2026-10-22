@@ -105,6 +105,7 @@ rm -f "$ROOTFS_DIR/tmp/setup.sh" "$ROOTFS_DIR/tmp/live.list"
 
 msg "Installing DebPlus into the live environment..."
 install -d "$ROOTFS_DIR/opt/debplus/packages"
+install -m644 "$SCRIPT_DIR/packages/target.list" "$SCRIPT_DIR/packages/firmware.list" "$ROOTFS_DIR/opt/debplus/packages/"
 cp -a "$SCRIPT_DIR/installer" "$ROOTFS_DIR/opt/debplus/"
 install -d "$ROOTFS_DIR/opt/debplus/options"
 install -m644 "$SCRIPT_DIR/profile.env" "$ROOTFS_DIR/opt/debplus/"
