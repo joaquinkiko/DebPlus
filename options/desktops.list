@@ -1,0 +1,8 @@
+# id|label|package. Package "-" installs no desktop.
+console|Console only|-
+gnome|GNOME|task-gnome-desktop
+kde|KDE Plasma|task-kde-desktop
+xfce|Xfce|task-xfce-desktop
+cinnamon|Cinnamon|task-cinnamon-desktop
+mate|MATE|task-mate-desktop
+lxqt|LXQt|task-lxqt-desktop

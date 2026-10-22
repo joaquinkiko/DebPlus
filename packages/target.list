@@ -1,0 +1,20 @@
+# Installed into the new system before the desktop choice. One package per line.
+linux-image-amd64
+systemd-sysv
+systemd-timesyncd
+locales
+console-setup
+keyboard-configuration
+sudo
+network-manager
+wpasupplicant
+wireless-regdb
+firmware-linux-free
+ca-certificates
+curl
+git
+nano
+btrfs-progs
+xfsprogs
+e2fsprogs
+dosfstools

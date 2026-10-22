@@ -1,0 +1,4 @@
+# id|label|description. Each ticked id is added to every apt source in the new system.
+contrib|Contrib|Free software with non-free dependencies
+non-free|Non-free|Proprietary software such as codecs and game drivers
+non-free-firmware|Non-free firmware|Wi-Fi, GPU, and microcode firmware

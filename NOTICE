@@ -1,0 +1,48 @@
+DebPlus
+Copyright (C) 2026 JoaquinKiko
+
+DebPlus is licensed under the GNU General Public License, version 2. See
+COPYING for the full text.
+
+Origin
+------
+
+DebPlus is derived from butterknife, an archinstall-style TUI installer for
+Debian 13 created by the Butterbian project (JustAGuyLinux):
+
+    https://justaguy.dev/drew/butterknife
+
+butterknife is licensed under GPL-2.0. The files below are derived from it and
+retain its copyright notice:
+
+    installer/app.py
+    installer/screens.py
+    installer/widgets.py
+    installer/installer.py
+    installer/utils.py
+
+Parts of the build approach and the Debian package lists also come from
+butterknife's build-iso.sh and build-rootfs.sh.
+
+Changes from butterknife
+------------------------
+
+The following are new in DebPlus, or substantially changed from butterknife:
+
+- Window managers and desktops are data files (options/wms.list, options/desktops.list), not a
+  hardcoded bash chooser.
+- Optional menus (Packages, Hardware, Software, Advanced) are driven by list
+  files (options/components.list, options/extras.list, packages/firmware.list).
+- Wi-Fi scanning, connection, and a connection test against the Debian mirror, and profiles are copied into the installed system.
+- Filesystem options are modified.
+- The installer reboots automatically after a successful install.
+- Configuration is in plain-text list files and profile.env, and the project
+  is branded as DebPlus.
+- Added --test option to installer for safer testing.
+
+Third-party software
+--------------------
+
+DebPlus installs Debian packages and window manager repositories at install
+time. Those packages and repositories keep their own licenses. Check each one
+before redistribution.

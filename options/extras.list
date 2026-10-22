@@ -1,0 +1,6 @@
+# menu|section|package|label. menu is hardware or software.
+# Rows with the same section are grouped under one header, in file order.
+hardware|Printing|cups|Print server (CUPS)
+software|Browsers|firefox-esr|Firefox ESR
+software|Media|vlc|VLC media player
+software|Office|libreoffice|LibreOffice suite
