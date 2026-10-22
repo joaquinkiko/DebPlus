@@ -420,18 +420,24 @@ def packages_menu(app):
 
 def _extras_screen(app, menu, title):
 	chosen = getattr(app.config, f"{menu}_packages")
+	entries = [(section, package, label)
+	           for row_menu, section, package, label in utils.extras_rows()
+	           if row_menu == menu]
+	entries += [(section, custom_id, label)
+	            for custom_id, row_menu, section, label, _script in utils.custom_rows()
+	            if row_menu == menu]
+	sections = {}
+	for section, package, label in entries:
+		sections.setdefault(section, []).append((package, label))
+
 	items = []
-	section_seen = None
-	for row_menu, section, package, label in utils.extras_rows():
-		if row_menu != menu:
-			continue
-		if section != section_seen:
-			section_seen = section
-			items += [urwid.Divider(), urwid.Text(("title", f"  {section}"))]
-		items.append(urwid.CheckBox(
-			f"  {label}", state=package in chosen,
-			on_state_change=_on_toggle,
-			user_data=(app, f"{menu}_packages", package)))
+	for section, section_entries in sections.items():
+		items += [urwid.Divider(), urwid.Text(("title", f"  {section}"))]
+		for package, label in section_entries:
+			items.append(urwid.CheckBox(
+				f"  {label}", state=package in chosen,
+				on_state_change=_on_toggle,
+				user_data=(app, f"{menu}_packages", package)))
 	items += [
 		urwid.Divider(),
 		urwid.Text(("label", "  Optional. Installed after the desktop.")),

@@ -305,13 +305,32 @@ def install_window_manager(config: Config):
 
 
 def install_extras(config: Config):
-	packages = config.hardware_packages + config.software_packages
+	custom_ids = {custom_id for custom_id, *_rest in utils.custom_rows()}
+	packages = [package for package in config.hardware_packages + config.software_packages
+	            if package not in custom_ids]
 	if not packages:
 		return
 	msg("Installing optional packages...")
 	_run(f"chroot {MNT} env DEBIAN_FRONTEND=noninteractive "
 	     f"apt-get install -y {' '.join(packages)}")
 	ok("Optional packages installed")
+
+
+def install_custom_software(config: Config):
+	selected = set(config.hardware_packages + config.software_packages)
+	for custom_id, _menu, _section, label, script in utils.custom_rows():
+		if custom_id not in selected:
+			continue
+		msg(f"Installing {label}...")
+		staged_path = f"{MNT}/tmp/{script}"
+		try:
+			shutil.copy2(os.path.join(utils.CUSTOM_DIR, script), staged_path)
+			if subprocess.run(f"chroot {MNT} sh /tmp/{script}", shell=True).returncode != 0:
+				print(f"  {RED}{label} failed. Fix it from Shell, or rerun the script.{NC}")
+				continue
+			ok(f"{label} installed")
+		finally:
+			_try(f"rm -f {staged_path}")
 
 
 # ── Bootloader ─────────────────────────────────────────────────────────
@@ -350,6 +369,7 @@ def run_install(config: Config):
 	install_desktop(config)
 	install_window_manager(config)
 	install_extras(config)
+	install_custom_software(config)
 	install_bootloader(config)
 
 	print(f"\n  {GREEN}{BOLD}Installation complete!{NC}")

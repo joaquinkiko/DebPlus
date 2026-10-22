@@ -16,6 +16,13 @@ EXTRAS_PATH = os.path.join(OPTIONS_DIR, "extras.list")
 COMPONENTS_PATH = os.path.join(OPTIONS_DIR, "components.list")
 TARGET_PACKAGES_PATH = os.path.join(ROOT_DIR, "packages", "target.list")
 FIRMWARE_PATH = os.path.join(ROOT_DIR, "packages", "firmware.list")
+CUSTOM_PATH = os.path.join(OPTIONS_DIR, "custom.list")
+CUSTOM_DIR = os.path.join(OPTIONS_DIR, "custom")
+
+
+def custom_rows():
+	"""(id, menu, section, label, script) per script-installed package."""
+	return _rows(CUSTOM_PATH)
 
 
 def run(command):
