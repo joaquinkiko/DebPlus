@@ -125,12 +125,22 @@ def is_online():
 	return run("ping -c 1 -W 1 1.1.1.1").returncode == 0
 
 
+def boot_medium_disk():
+	"""Whole-disk path the live medium was booted from, or None outside live mode."""
+	source = run(["findmnt", "-no", "SOURCE", "/run/live/medium"]).stdout.strip()
+	if not source:
+		return None
+	parent = run(["lsblk", "-no", "PKNAME", source]).stdout.strip().splitlines()
+	return f"/dev/{parent[0]}" if parent and parent[0] else source
+
+
 def get_disks():
-	"""(device, size, model) for whole disks, excluding floppy, RAM, loop, and optical."""
+	"""(device, size, model) for whole disks, excluding floppy, RAM, loop, optical, and the boot medium."""
+	boot_disk = boot_medium_disk()
 	disks = []
 	for line in run("lsblk -dnpo NAME,SIZE,MODEL -e 1,2,7,11").stdout.splitlines():
 		parts = line.split(None, 2)
-		if len(parts) < 2 or "zram" in parts[0]:
+		if len(parts) < 2 or "zram" in parts[0] or parts[0] == boot_disk:
 			continue
 		disks.append((parts[0], parts[1], parts[2].strip() if len(parts) > 2 else ""))
 	return disks
