@@ -289,10 +289,10 @@ def _fetch_wm_source(repo, ref, clone_path):
 	                      shell=True).returncode == 0
 
 
-def install_window_manager(config: Config):
+def install_window_manager(config: Config) -> bool:
 	entry = next((row for row in utils.wm_rows() if row[0] == config.desktop), None)
 	if entry is None:
-		return
+		return True
 	wm_id, label, repo, ref, _description = entry
 	msg(f"Installing {label}...")
 
@@ -308,12 +308,13 @@ def install_window_manager(config: Config):
 		os.chmod(sudoers_path, 0o440)
 		if not _fetch_wm_source(repo, ref, clone_path):
 			print(f"  {RED}{label} source unavailable.{NC}")
-			return
+			return False
 		for step in steps:
 			if subprocess.run(step, shell=True).returncode != 0:
 				print(f"  {RED}{label} failed. Fix it from Shell, or rerun its install.sh.{NC}")
-				return
+				return False
 		ok(f"{label} installed")
+		return True
 	finally:
 		_try(f"rm -f {sudoers_path}")
 		_try(f"rm -rf {MNT}{clone_path}")
@@ -331,8 +332,9 @@ def install_extras(config: Config):
 	ok("Optional packages installed")
 
 
-def install_custom_software(config: Config):
+def install_custom_software(config: Config) -> list:
 	selected = set(config.hardware_packages + config.software_packages)
+	failed = []
 	for custom_id, _menu, _section, label, script, _requirement in utils.custom_rows():
 		if custom_id not in selected:
 			continue
@@ -342,10 +344,12 @@ def install_custom_software(config: Config):
 			shutil.copy2(os.path.join(utils.CUSTOM_DIR, script), staged_path)
 			if subprocess.run(f"chroot {MNT} sh /tmp/{script}", shell=True).returncode != 0:
 				print(f"  {RED}{label} failed. Fix it from Shell, or rerun the script.{NC}")
+				failed.append(label)
 				continue
 			ok(f"{label} installed")
 		finally:
 			_try(f"rm -f {staged_path}")
+	return failed
 
 
 # ── Bootloader ─────────────────────────────────────────────────────────
@@ -373,19 +377,51 @@ def cleanup():
 	ok("Done")
 
 
+def _failure_prompt():
+	"""Offer reboot or a chrooted shell after a failed install."""
+	while True:
+		try:
+			choice = input(f"\n  {BOLD}(R)eboot or (S)hell?{NC} ").strip().lower()
+		except (EOFError, KeyboardInterrupt):
+			print(f"\n  Target remains mounted at {MNT}.")
+			return
+		if choice in ("r", "reboot"):
+			cleanup()
+			subprocess.run("reboot", shell=True)
+			return
+		if choice in ("s", "shell"):
+			print(f"\n  Chrooted into {MNT}. Type 'exit' to return.\n")
+			subprocess.run(["chroot", MNT, "/bin/bash"])
+		else:
+			print("  Enter R or S.")
+
+
 def run_install(config: Config):
 	print(f"\n  {BOLD}{CYAN}Installing {PROFILE['PROFILE_NAME']}{NC}\n")
 	_try(f"hostname {config.hostname}")
 
-	partition_disk(config)
-	install_base(config)
-	configure_system(config)
-	create_users(config)
-	install_desktop(config)
-	install_window_manager(config)
-	install_extras(config)
-	install_custom_software(config)
-	install_bootloader(config)
+	failures = []
+	try:
+		partition_disk(config)
+		install_base(config)
+		configure_system(config)
+		create_users(config)
+		install_desktop(config)
+		if not install_window_manager(config):
+			failures.append("Window manager")
+		install_extras(config)
+		failures += install_custom_software(config)
+		install_bootloader(config)
+	except BaseException:
+		cleanup()
+		raise
+
+	if failures:
+		print(f"\n  {RED}{BOLD}Installed with errors:{NC}")
+		for failure in failures:
+			print(f"  {RED}- {failure}{NC}")
+		_failure_prompt()
+		return
 
 	print(f"\n  {GREEN}{BOLD}Installation complete!{NC}")
 	print("\n  Rebooting in 30 seconds. Remove the installation media if the")
