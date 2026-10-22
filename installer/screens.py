@@ -403,7 +403,7 @@ def packages_menu(app):
 	for component_id, label, description in utils.components_rows():
 		items.append(urwid.CheckBox(
 			f"  {label}", state=component_id in app.config.components,
-			on_state_change=_on_toggle,
+			on_state_change=_on_archive_toggle,
 			user_data=(app, "components", component_id)))
 		items.append(urwid.Text(("label", f"      {description}")))
 	items += [
@@ -418,26 +418,48 @@ def packages_menu(app):
 
 # ── Hardware and Software (optional packages) ──────────────────────────
 
+def _drop_unavailable(config):
+	"""Remove selected packages whose required archive is no longer enabled."""
+	requirements = utils.package_requirements()
+	available = {"-", *config.components}
+	for attribute in ("hardware_packages", "software_packages"):
+		chosen = getattr(config, attribute)
+		chosen[:] = [package for package in chosen
+		if requirements.get(package, "-") in available]
+
+
+def _on_archive_toggle(box, state, user_data):
+	_on_toggle(box, state, user_data)
+	if not state:
+		_drop_unavailable(user_data[0].config)
+
+
+def _package_row(app, menu, package, label, requirement):
+	chosen = getattr(app.config, f"{menu}_packages")
+	if requirement == "-" or requirement in app.config.components:
+		return urwid.CheckBox(
+			f"  {label}", state=package in chosen,
+			on_state_change=_on_toggle,
+			user_data=(app, f"{menu}_packages", package))
+	return urwid.Text(("unset", f"  {label}  requires {requirement}"))
+
+
 def _extras_screen(app, menu, title):
 	chosen = getattr(app.config, f"{menu}_packages")
-	entries = [(section, package, label)
-	           for row_menu, section, package, label in utils.extras_rows()
-	           if row_menu == menu]
-	entries += [(section, custom_id, label)
-	            for custom_id, row_menu, section, label, _script in utils.custom_rows()
-	            if row_menu == menu]
+	entries = [(section, package, label, requirement)
+		for row_menu, section, package, label, requirement in utils.extras_rows()
+		if row_menu == menu]
+	entries += [(section, custom_id, label, requirement)
+		for custom_id, row_menu, section, label, _script, requirement in utils.custom_rows()
+		if row_menu == menu]
 	sections = {}
-	for section, package, label in entries:
-		sections.setdefault(section, []).append((package, label))
-
+	for section, package, label, requirement in entries:
+		sections.setdefault(section, []).append((package, label, requirement))
 	items = []
 	for section, section_entries in sections.items():
 		items += [urwid.Divider(), urwid.Text(("title", f"  {section}"))]
-		for package, label in section_entries:
-			items.append(urwid.CheckBox(
-				f"  {label}", state=package in chosen,
-				on_state_change=_on_toggle,
-				user_data=(app, f"{menu}_packages", package)))
+		for package, label, requirement in section_entries:
+			items.append(_package_row(app, menu, package, label, requirement))
 	items += [
 		urwid.Divider(),
 		urwid.Text(("label", "  Optional. Installed after the desktop.")),

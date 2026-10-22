@@ -195,3 +195,12 @@ def wifi_test():
 	if code.startswith(("2", "3")):
 		return True, f"Connected, {MIRROR} reachable (HTTP {code})"
 	return False, f"Connected, but {MIRROR} is unreachable (HTTP {code or 'none'})"
+
+
+def package_requirements():
+	"""Package id -> required archive id, or '-' when none."""
+	requirements = {package: requires
+	                for _menu, _section, package, _label, requires in extras_rows()}
+	requirements.update({custom_id: requires
+	                     for custom_id, _menu, _section, _label, _script, requires in custom_rows()})
+	return requirements

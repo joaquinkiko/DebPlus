@@ -333,7 +333,7 @@ def install_extras(config: Config):
 
 def install_custom_software(config: Config):
 	selected = set(config.hardware_packages + config.software_packages)
-	for custom_id, _menu, _section, label, script in utils.custom_rows():
+	for custom_id, _menu, _section, label, script, _requirement in utils.custom_rows():
 		if custom_id not in selected:
 			continue
 		msg(f"Installing {label}...")

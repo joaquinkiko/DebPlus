@@ -1,8 +1,8 @@
-# menu|section|package|label. menu is hardware or software.
+# menu|section|package|label|requires. menu is hardware or software.
 # Rows with the same section are grouped under one header, in file order.
-hardware|Printing|cups|Print server (CUPS)
-hardware|Graphics|nvidia-detect nvidia-driver nvidia-settings|NVIDIA Drivers
-software|Browsers|firefox-esr|Firefox ESR
-software|Media|vlc|VLC media player
-software|Office|libreoffice|LibreOffice suite
-software|Packages|snapd|Snapd
+hardware|Printing|cups|Print server (CUPS)|-
+hardware|Graphics|nvidia-detect nvidia-driver nvidia-settings|NVIDIA Drivers|non-free
+software|Browsers|firefox-esr|Firefox ESR|-
+software|Media|vlc|VLC media player|-
+software|Office|libreoffice|LibreOffice suite|-
+software|Packages|snapd|Snapd|-
