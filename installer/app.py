@@ -50,6 +50,7 @@ class App:
 		self._in_main = True
 		self._menu_focus = 0
 		self._active_step = None
+		self.online = utils.is_online()
 
 		self.frame = urwid.Frame(
 			urwid.SolidFill(),
@@ -98,7 +99,7 @@ class App:
 		"""(label, value, callback) per step. A truthy value marks it done."""
 		config = self.config
 		return [
-			("Network",      "connected" if utils.is_online() else "",
+			("Network",      "connected" if self.online else "",
 			                 lambda: screens.network(self)),
 			("Keyboard",     config.keymap,     lambda: screens.keyboard(self)),
 			("Timezone",     config.timezone,   lambda: screens.timezone(self)),

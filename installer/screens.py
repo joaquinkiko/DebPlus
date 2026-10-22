@@ -68,9 +68,9 @@ def _on_flag(_box, state, user_data):
 # ── Network ────────────────────────────────────────────────────────────
 
 def network(app):
-	online = utils.is_online()
+	app.online = utils.is_online()
 	items = [
-		urwid.Text(("success", "  Connected") if online else ("error", "  Offline")),
+		urwid.Text(("success", "  Connected") if app.online else ("error", "  Offline")),
 		urwid.Divider(),
 		_action("  Wi-Fi networks", lambda _: _wifi_scan(app)),
 		_action("  Launch nmtui (full network manager)", lambda _: _launch_nmtui(app)),
