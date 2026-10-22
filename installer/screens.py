@@ -368,23 +368,28 @@ def user(app):
 
 # ── Desktop and window managers ────────────────────────────────────────
 
+def _choice_rows(app, choice_id, label, detail, description):
+	return [
+		_action(f"  {label:<14}{detail}",
+		        lambda _, v=choice_id: _set(app, "desktop", v)),
+		urwid.Text(("label", f"      {description}")),
+		urwid.Divider(),
+	]
+
+
 def desktop(app):
-	items = [
-		_action(f"  {label:<14}{package}",
-		        lambda _, v=desktop_id: _set(app, "desktop", v))
-		for desktop_id, label, package in utils.desktop_rows()
-	]
-	wm_items = [
-		_action(f"  {label:<14}{repo}",
-		        lambda _, v=wm_id: _set(app, "desktop", v))
-		for wm_id, label, repo, _ref in utils.wm_rows()
-	]
+	items = []
+	for desktop_id, label, package, description in utils.desktop_rows():
+		items += _choice_rows(app, desktop_id, label, package, description)
+	wm_items = []
+	for wm_id, label, repo, _ref, description in utils.wm_rows():
+		wm_items += _choice_rows(app, wm_id, label, repo, description)
 	if wm_items:
-		items += [urwid.Divider(), urwid.Text(("label", "  Window managers (wms.list)"))]
+		items += [urwid.Text(("label", "  Window managers (wms.list)")),
+		          urwid.Divider()]
 		items += wm_items
 	items += [
-		urwid.Divider(),
-		urwid.Text(("label", "  Debian's default desktop tasks, installed with apt.")),
+		urwid.Text(("label", "  Default GUI environment.")),
 		urwid.Divider(),
 		_back_button(app),
 	]

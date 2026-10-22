@@ -265,7 +265,7 @@ def create_users(config: Config):
 # ── Desktop, window manager, optional packages ────────────────────────
 
 def install_desktop(config: Config):
-	package = next((pkg for desktop_id, _, pkg in desktop_rows()
+	package = next((pkg for desktop_id, _, pkg, _description in desktop_rows()
 	                if desktop_id == config.desktop), "-")
 	if package == "-":
 		return
@@ -279,7 +279,7 @@ def install_window_manager(config: Config):
 	entry = next((row for row in utils.wm_rows() if row[0] == config.desktop), None)
 	if entry is None:
 		return
-	wm_id, label, repo, ref = entry
+	wm_id, label, repo, ref, _description = entry
 	msg(f"Installing {label}...")
 
 	clone_path = f"/tmp/wm-{wm_id}"

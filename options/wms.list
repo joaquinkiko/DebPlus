@@ -1,2 +1,2 @@
-# id|label|repo|ref. ref is a git tag or branch, or "-" for the default branch.
+# id|label|repo|ref|description. ref is a git tag or branch, or "-" for the default branch.
 # Each repo must have install.sh at its root. Ids must be unique across desktops.list.
