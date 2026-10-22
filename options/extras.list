@@ -5,3 +5,4 @@ hardware|Graphics|nvidia-detect nvidia-driver nvidia-settings|NVIDIA Drivers
 software|Browsers|firefox-esr|Firefox ESR
 software|Media|vlc|VLC media player
 software|Office|libreoffice|LibreOffice suite
+software|Packages|snapd|Snapd
