@@ -275,6 +275,20 @@ def install_desktop(config: Config):
 	ok("Desktop installed")
 
 
+def _fetch_wm_source(repo, ref, clone_path):
+	"""Place window manager source at clone_path inside the target. Returns success."""
+	if repo.startswith("/"):
+		try:
+			shutil.copytree(repo, f"{MNT}{clone_path}", dirs_exist_ok=True)
+		except OSError as error:
+			print(f"  {RED}Cannot copy {repo}: {error}{NC}")
+			return False
+		return True
+	branch = "" if ref == "-" else f"--branch {ref}"
+	return subprocess.run(f"chroot {MNT} git clone --depth 1 {branch} {repo} {clone_path}",
+	                      shell=True).returncode == 0
+
+
 def install_window_manager(config: Config):
 	entry = next((row for row in utils.wm_rows() if row[0] == config.desktop), None)
 	if entry is None:
@@ -284,9 +298,7 @@ def install_window_manager(config: Config):
 
 	clone_path = f"/tmp/wm-{wm_id}"
 	sudoers_path = f"{MNT}/etc/sudoers.d/99-debplus-wm"
-	branch = "" if ref == "-" else f"--branch {ref}"
 	steps = [
-		f"chroot {MNT} git clone --depth 1 {branch} {repo} {clone_path}",
 		f"chroot {MNT} chown -R {config.username}:{config.username} {clone_path}",
 		f"chroot {MNT} runuser -l {config.username} -c 'cd {clone_path} && bash install.sh'",
 	]
@@ -294,6 +306,9 @@ def install_window_manager(config: Config):
 		with open(sudoers_path, "w") as sudoers_file:
 			sudoers_file.write(f"{config.username} ALL=(ALL) NOPASSWD: ALL\n")
 		os.chmod(sudoers_path, 0o440)
+		if not _fetch_wm_source(repo, ref, clone_path):
+			print(f"  {RED}{label} source unavailable.{NC}")
+			return
 		for step in steps:
 			if subprocess.run(step, shell=True).returncode != 0:
 				print(f"  {RED}{label} failed. Fix it from Shell, or rerun its install.sh.{NC}")

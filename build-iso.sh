@@ -110,6 +110,7 @@ install -d "$ROOTFS_DIR/opt/debplus/options"
 install -m644 "$SCRIPT_DIR/profile.env" "$ROOTFS_DIR/opt/debplus/"
 install -m644 "$SCRIPT_DIR"/options/*.list "$ROOTFS_DIR/opt/debplus/options/"
 cp -a "$SCRIPT_DIR/options/custom" "$ROOTFS_DIR/opt/debplus/options/"
+cp -a "$SCRIPT_DIR/options/wm" "$ROOTFS_DIR/opt/debplus/options/"
 
 cleanup_mounts
 

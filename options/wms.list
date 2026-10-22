@@ -1,2 +1,3 @@
-# id|label|repo|ref|description. ref is a git tag or branch, or "-" for the default branch.
-# Each repo must have install.sh at its root. Ids must be unique across desktops.list.
+# id|label|repo|ref|description. repo is a git URL or an absolute local directory path starting with '/'.
+# ref is a git tag or branch, or "-" for the default branch; ignored for local directories.
+# Each source must have install.sh at its root. Ids must be unique across desktops.list.
