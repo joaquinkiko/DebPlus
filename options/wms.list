@@ -1,5 +1,5 @@
-# id|label|repo|ref|description. repo is a git URL or an absolute local directory path starting with '/'.
+# id|label|repo|ref|description. repo is a git URL or path relative to project root starting with '/'.
 # ref is a git tag or branch, or "-" for the default branch; ignored for local directories.
 # Each source must have install.sh at its root. Ids must be unique across desktops.list.
-cosmic|Cosmic (Trixie)|/wm/cosmic.sh|-|Unofficial JustAGuyLinux Trixie build of System76's Gnome-inspired Desktop
+cosmic|Cosmic (Trixie)|/options/wm/cosmic|-|Unofficial JustAGuyLinux Trixie build of System76's Gnome-inspired Desktop
 

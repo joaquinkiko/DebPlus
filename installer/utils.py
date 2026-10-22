@@ -62,8 +62,9 @@ def desktop_rows():
 
 
 def wm_rows():
-	"""(id, label, repo, ref) per window manager repo."""
-	return _rows(WMS_PATH)
+	"""(id, label, repo, ref, description) per window manager repo."""
+	return [(wm_id, label, repo if "://" in repo else os.path.join(ROOT_DIR, repo), ref, description)
+		for wm_id, label, repo, ref, description in _rows(WMS_PATH)]
 
 
 def extras_rows():
