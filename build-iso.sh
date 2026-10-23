@@ -136,12 +136,12 @@ set default=0
 set timeout=2
 
 menuentry "DebPlus Installer" {
-    linux /boot/vmlinuz boot=live quiet
+    linux /boot/vmlinuz boot=live
     initrd /boot/initrd.img
 }
 
 menuentry "DebPlus Installer (safe graphics)" {
-    linux /boot/vmlinuz boot=live quiet nomodeset
+    linux /boot/vmlinuz boot=live nomodeset
     initrd /boot/initrd.img
 }
 GRUB
