@@ -109,7 +109,7 @@ class App:
 			("Hostname",     config.hostname,   lambda: screens.hostname(self)),
 			("User account", config.username,   lambda: screens.user(self)),
 			("Desktop",      config.desktop,    lambda: screens.desktop(self)),
-			("Archives",     _chosen_label(config.components),
+			("Components",     _chosen_label(config.components),
 			                 lambda: screens.packages_menu(self)),
 			("Hardware",     _chosen_label(config.hardware_packages),
 			                 lambda: screens.hardware(self)),
@@ -172,7 +172,7 @@ class App:
 			("Hostname",   config.hostname),
 			("User",       config.username),
 			("Desktop",    config.desktop),
-			("Archives",   ", ".join(["main"] + config.components)),
+			("Components",   ", ".join(["main"] + config.components)),
 			("Extras",     ", ".join(config.hardware_packages + config.software_packages)),
 			("Advanced",   ", ".join(config.advanced_labels())),
 		]:

@@ -408,7 +408,7 @@ def packages_menu(app):
 		items.append(urwid.Text(("label", f"      {description}")))
 	items += [
 		urwid.Divider(),
-		urwid.Text(("label", "  Optional. Adds apt archives to the installed system.")),
+		urwid.Text(("label", "  Optional. Adds apt sources to the installed system.")),
 		urwid.Divider(),
 		_back_button(app),
 	]
@@ -519,7 +519,7 @@ def summary(app):
 		("User",       config.username),
 		("Root login", "yes" if config.root_pass else "disabled"),
 		("Desktop",    config.desktop),
-		("Archives", ", ".join(config.components) or "main only"),
+		("Components", ", ".join(config.components) or "main only"),
 		("Hardware",   ", ".join(config.hardware_packages) or "none"),
 		("Software",   ", ".join(config.software_packages) or "none"),
 		("Advanced",   ", ".join(config.advanced_labels()) or "none"),
