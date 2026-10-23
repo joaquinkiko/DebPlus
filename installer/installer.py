@@ -248,7 +248,8 @@ def copy_wifi_profiles():
 
 def create_users(config: Config):
 	msg("Creating users...")
-	_run(f"chroot {MNT} useradd -m -G sudo,audio,video,netdev "
+	_run(f"chroot {MNT} groupadd -f lpadmin")
+	_run(f"chroot {MNT} useradd -m -G sudo,audio,video,netdev,lpadmin "
 	     f"-s /bin/bash {config.username}")
 	subprocess.run(["chroot", MNT, "chpasswd"],
 	               input=f"{config.username}:{config.user_pass}\n",
