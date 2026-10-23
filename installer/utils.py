@@ -192,12 +192,24 @@ def wifi_scan():
 
 def wifi_connect(ssid, password):
 	"""(success, message). Password is None for open networks."""
-	command = ["nmcli", "device", "wifi", "connect", ssid]
+	name = re.sub(r"[^A-Za-z0-9_-]", "_", ssid)
+	path = os.path.join("/etc/NetworkManager/system-connections", f"{name}.nmconnection")
+	lines = [
+		"[connection]", f"id={ssid}", "type=wifi", "",
+		"[wifi]", f"ssid={ssid}", "mode=infrastructure", "",
+	]
 	if password:
-		command += ["password", password]
-	result = run(command)
+		lines += ["[wifi-security]", "key-mgmt=wpa-psk", f"psk={password}", ""]
+
+	fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+	with os.fdopen(fd, "w") as profile_file:
+		profile_file.write("\n".join(lines) + "\n")
+
+	run(["nmcli", "connection", "reload"])
+	result = run(["nmcli", "connection", "up", "id", ssid])
 	if result.returncode == 0:
 		return True, f"Connected to {ssid}"
+	os.remove(path)
 	return False, result.stderr.strip() or f"Failed to connect to {ssid}"
 
 
