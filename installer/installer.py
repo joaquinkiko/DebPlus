@@ -125,10 +125,11 @@ def write_apt_sources(config: Config):
 			f"Types: deb\nURIs: {MIRROR}\nSuites: {SUITE}-backports\n"
 			f"Components: {components}\n{keyring}\n"
 		)
-		# Priority 100 keeps backports opt-in. -t raises it to 990 for that release.
 		os.makedirs(f"{MNT}/etc/apt/preferences.d", exist_ok=True)
 		with open(f"{MNT}/etc/apt/preferences.d/backports", "w") as pin_file:
-			pin_file.write(f"Package: *\nPin: release a={SUITE}-backports\nPin-Priority: 100\n")
+			pin_file.write(f"Package: linux-image-amd64 linux-headers-amd64\n"
+							f"Pin: release a={SUITE}-backports\n"
+							f"Pin-Priority: 990\n")
 
 	with open(f"{MNT}/etc/apt/sources.list.d/debian.sources", "w") as sources_file:
 		sources_file.write("\n".join(stanzas))
@@ -163,7 +164,7 @@ def install_base(config: Config):
 	if config.backports_kernel:
 		msg("Installing backports kernel...")
 		_run(f"chroot {MNT} env DEBIAN_FRONTEND=noninteractive apt-get install -y "
-		     f"-t {SUITE}-backports linux-image-amd64")
+		     f"-t {SUITE}-backports linux-image-amd64 linux-headers-amd64")
 
 	_run(f"chroot {MNT} apt-get clean")
 	ok("Base system installed")
