@@ -383,10 +383,8 @@ def desktop(app):
 		items += _choice_rows(app, desktop_id, label, package, description)
 	wm_items = []
 	for wm_id, label, repo, _ref, description in utils.wm_rows():
-		wm_items += _choice_rows(app, wm_id, label, repo, description)
+		wm_items += _choice_rows(app, wm_id, label, "", description)
 	if wm_items:
-		items += [urwid.Text(("label", "  Window managers (wms.list)")),
-		          urwid.Divider()]
 		items += wm_items
 	items += [
 		urwid.Text(("label", "  Default GUI environment.")),
