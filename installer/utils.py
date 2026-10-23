@@ -11,7 +11,7 @@ MNT = "/mnt/debplus"
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OPTIONS_DIR = os.path.join(ROOT_DIR, "options")
 WM_DIR = os.path.join(OPTIONS_DIR, "wm")
-DESKTOPS_PATH = os.path.join(OPTIONS_DIR, "desktops.list")
+CONSOLE_ROW = ("console", "Console only", "-", "No desktop, text console only")
 WMS_PATH = os.path.join(OPTIONS_DIR, "wms.list")
 EXTRAS_PATH = os.path.join(OPTIONS_DIR, "extras.list")
 COMPONENTS_PATH = os.path.join(OPTIONS_DIR, "components.list")
@@ -58,8 +58,9 @@ def _rows(path):
 
 
 def desktop_rows():
-	"""(id, label, package) per Debian desktop option."""
-	return _rows(DESKTOPS_PATH)
+	"""(id, label, package, description) per desktop. Console is always first."""
+	"""Old code"""
+	return [CONSOLE_ROW]
 
 
 def wm_rows():
