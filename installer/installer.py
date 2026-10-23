@@ -127,9 +127,13 @@ def write_apt_sources(config: Config):
 		)
 		os.makedirs(f"{MNT}/etc/apt/preferences.d", exist_ok=True)
 		with open(f"{MNT}/etc/apt/preferences.d/backports", "w") as pin_file:
-			pin_file.write(f"Package: linux-image-amd64 linux-headers-amd64\n"
-							f"Pin: release a={SUITE}-backports\n"
-							f"Pin-Priority: 990\n")
+			# Repo stays opt-in: packages install only with -t
+			pin_file.write(f"Package: *\nPin: release a={SUITE}-backports\n"
+			               f"Pin-Priority: 100\n")
+			if config.backports_kernel:
+				pin_file.write(f"\nPackage: linux-image-amd64 linux-headers-amd64\n"
+				               f"Pin: release a={SUITE}-backports\n"
+				               f"Pin-Priority: 990\n")
 
 	with open(f"{MNT}/etc/apt/sources.list.d/debian.sources", "w") as sources_file:
 		sources_file.write("\n".join(stanzas))
