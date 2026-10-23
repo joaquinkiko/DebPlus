@@ -498,6 +498,11 @@ def advanced(app):
 		               user_data=(app, "backports_kernel")),
 		urwid.Text(("label", "      Newer kernel from trixie-backports. Enables the repository.")),
 		urwid.Divider(),
+        urwid.CheckBox("  Backports Mesa", state=config.backports_mesa,
+		               on_state_change=_on_flag,
+		               user_data=(app, "backports_mesa")),
+		urwid.Text(("label", "      Newer Mesa drivers from trixie-backports, kept updated.")),
+		urwid.Divider(),
 		_back_button(app),
 	]
 	app.show_screen(_screen("Advanced", items),

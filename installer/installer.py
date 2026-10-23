@@ -28,6 +28,8 @@ FSTAB_OPTIONS = {
 	"ext4": "errors=remount-ro",
 	"xfs": "defaults",
 }
+MESA_PACKAGES = ["libgl1-mesa-dri", "libglx-mesa0", "libegl-mesa0", "libgbm1",
+                 "mesa-vulkan-drivers", "mesa-va-drivers"]
 
 
 def msg(text):
@@ -120,7 +122,8 @@ def write_apt_sources(config: Config):
 		f"Suites: {SUITE}-security\nComponents: {components}\n{keyring}\n",
 	]
 
-	if config.backports_repo or config.backports_kernel:
+	backports_enabled = config.backports_repo or config.backports_kernel or config.backports_mesa
+	if backports_enabled:
 		stanzas.append(
 			f"Types: deb\nURIs: {MIRROR}\nSuites: {SUITE}-backports\n"
 			f"Components: {components}\n{keyring}\n"
@@ -132,6 +135,11 @@ def write_apt_sources(config: Config):
 			               f"Pin-Priority: 100\n")
 			if config.backports_kernel:
 				pin_file.write(f"\nPackage: linux-image-amd64 linux-headers-amd64\n"
+				               f"Pin: release a={SUITE}-backports\n"
+				               f"Pin-Priority: 990\n")
+			if config.backports_mesa:
+				# Glob catches the Mesa libraries and drivers; libgbm1 has no "mesa" in its name
+				pin_file.write(f"\nPackage: *mesa* libgbm1\n"
 				               f"Pin: release a={SUITE}-backports\n"
 				               f"Pin-Priority: 990\n")
 
@@ -169,6 +177,11 @@ def install_base(config: Config):
 		msg("Installing backports kernel...")
 		_run(f"chroot {MNT} env DEBIAN_FRONTEND=noninteractive apt-get install -y "
 		     f"-t {SUITE}-backports linux-image-amd64 linux-headers-amd64")
+
+	if config.backports_mesa:
+		msg("Installing backports Mesa...")
+		_run(f"chroot {MNT} env DEBIAN_FRONTEND=noninteractive apt-get install -y "
+		     f"-t {SUITE}-backports {' '.join(MESA_PACKAGES)}")
 
 	_run(f"chroot {MNT} apt-get clean")
 	ok("Base system installed")
