@@ -80,9 +80,7 @@ class App:
 		        for key in keys]
 
 	def _input(self, key):
-		if key == "esc":
-			if self._in_main:
-				raise urwid.ExitMainLoop()
+		if key == "esc" and not self._in_main:
 			self.show_main()
 		elif key in ("q", "Q") and self._in_main:
 			raise urwid.ExitMainLoop()
