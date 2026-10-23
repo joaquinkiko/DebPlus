@@ -479,6 +479,13 @@ def software(app):
 
 
 # ── Advanced ───────────────────────────────────────────────────────────
+def _on_backports_repo(_box, state, app):
+	app.config.backports_repo = state
+	if not state:
+		app.config.backports_kernel = False
+		app.config.backports_mesa = False
+	advanced(app)
+
 
 def advanced(app):
 	config = app.config
@@ -489,22 +496,30 @@ def advanced(app):
 		urwid.Text(("label", "      Adds the i386 architecture for 32-bit libraries and apps.")),
 		urwid.Divider(),
 		urwid.CheckBox("  Backports repository", state=config.backports_repo,
-		               on_state_change=_on_flag,
-		               user_data=(app, "backports_repo")),
+		               on_state_change=_on_backports_repo,
+		               user_data=app),
 		urwid.Text(("label", "      trixie-backports, pinned so nothing upgrades unless requested.")),
 		urwid.Divider(),
-		urwid.CheckBox("  Backports kernel", state=config.backports_kernel,
-		               on_state_change=_on_flag,
-		               user_data=(app, "backports_kernel")),
-		urwid.Text(("label", "      Newer kernel from trixie-backports. Enables the repository.")),
-		urwid.Divider(),
-        urwid.CheckBox("  Backports Mesa", state=config.backports_mesa,
-		               on_state_change=_on_flag,
-		               user_data=(app, "backports_mesa")),
-		urwid.Text(("label", "      Newer Mesa drivers from trixie-backports, kept updated.")),
-		urwid.Divider(),
-		_back_button(app),
 	]
+	if config.backports_repo:
+		items += [
+			urwid.CheckBox("  Backports kernel", state=config.backports_kernel,
+			               on_state_change=_on_flag,
+			               user_data=(app, "backports_kernel")),
+			urwid.Text(("label", "      Newer kernel from trixie-backports, kept updated.")),
+			urwid.Divider(),
+			urwid.CheckBox("  Backports Mesa", state=config.backports_mesa,
+			               on_state_change=_on_flag,
+			               user_data=(app, "backports_mesa")),
+			urwid.Text(("label", "      Newer Mesa drivers from trixie-backports, kept updated.")),
+			urwid.Divider(),
+		]
+	else:
+		items += [
+			urwid.Text(("unset", "  Backports kernel and Mesa require the backports repository.")),
+			urwid.Divider(),
+		]
+	items.append(_back_button(app))
 	app.show_screen(_screen("Advanced", items),
 	                footer_text="  ↑↓ navigate  Space toggle  Esc back")
 
