@@ -302,16 +302,23 @@ def install_window_manager(config: Config) -> bool:
 		_try(f"rm -rf {MNT}{clone_path}")
 
 
-def install_extras(config: Config):
+def install_extras(config: Config) -> list:
 	custom_ids = {custom_id for custom_id, *_rest in utils.custom_rows()}
+	labels = {package: label for _menu, _section, package, label, _requires in utils.extras_rows()}
 	packages = [package for package in config.hardware_packages + config.software_packages
 	            if package not in custom_ids]
-	if not packages:
-		return
-	msg("Installing optional packages...")
-	_run(f"chroot {MNT} env DEBIAN_FRONTEND=noninteractive "
-	     f"apt-get install -y {' '.join(packages)}")
-	ok("Optional packages installed")
+	failed = []
+	for package in packages:
+		label = labels.get(package, package)
+		msg(f"Installing {label}...")
+		result = subprocess.run(f"chroot {MNT} env DEBIAN_FRONTEND=noninteractive "
+		                        f"apt-get install -y {package}", shell=True)
+		if result.returncode != 0:
+			print(f"  {RED}{label} failed. Fix it from Shell, or rerun: apt-get install {package}{NC}")
+			failed.append(label)
+		else:
+			ok(f"{label} installed")
+	return failed
 
 
 def install_custom_software(config: Config) -> list:
@@ -390,7 +397,7 @@ def run_install(config: Config):
 		create_users(config)
 		if not install_window_manager(config):
 			failures.append("Window manager")
-		install_extras(config)
+		failures += install_extras(config)
 		failures += install_custom_software(config)
 		install_bootloader(config)
 	except BaseException:
