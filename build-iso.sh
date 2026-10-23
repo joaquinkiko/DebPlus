@@ -31,6 +31,10 @@ done
 [ -d /usr/lib/grub/i386-pc ] || die "Missing grub BIOS modules (grub-pc-bin)"
 [ -d /usr/lib/grub/x86_64-efi ] || die "Missing grub UEFI modules (grub-efi-amd64-bin)"
 
+cleanup_mounts
+if findmnt -rnlo TARGET | grep -q "^$WORK_DIR/"; then
+	die "Mounts still active under $WORK_DIR, unmount them before rebuilding"
+fi
 rm -rf "$WORK_DIR"
 mkdir -p "$ROOTFS_DIR" "$ISO_DIR/boot/grub" "$ISO_DIR/live"
 
@@ -99,8 +103,10 @@ apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/*
 SETUP
 
-chmod +x "$ROOTFS_DIR/tmp/setup.sh"
+chmod +x "$ROOTFS_DIR/tmp/
+cp /etc/resolv.conf "$ROOTFS_DIR/etc/resolv.conf"
 chroot "$ROOTFS_DIR" env MIRROR="$MIRROR" SUITE="$SUITE" /tmp/setup.sh
+: > "$ROOTFS_DIR/etc/resolv.conf"
 rm -f "$ROOTFS_DIR/tmp/setup.sh" "$ROOTFS_DIR/tmp/live.list"
 
 msg "Installing DebPlus into the live environment..."
@@ -120,8 +126,10 @@ mksquashfs "$ROOTFS_DIR" "$ISO_DIR/live/filesystem.squashfs" \
 	-comp zstd -Xcompression-level 22 -noappend -quiet
 
 msg "Copying kernel and initrd..."
-cp "$ROOTFS_DIR"/boot/vmlinuz-* "$ISO_DIR/boot/vmlinuz"
-cp "$ROOTFS_DIR"/boot/initrd.img-* "$ISO_DIR/boot/initrd.img"
+kernel_file="$(ls -1 "$ROOTFS_DIR"/boot/vmlinuz-* | sort -V | tail -n1)"
+initrd_file="$(ls -1 "$ROOTFS_DIR"/boot/initrd.img-* | sort -V | tail -n1)"
+cp "$kernel_file" "$ISO_DIR/boot/vmlinuz"
+cp "$initrd_file" "$ISO_DIR/boot/initrd.img"
 
 cat > "$ISO_DIR/boot/grub/grub.cfg" << 'GRUB'
 set default=0
@@ -143,5 +151,9 @@ grub-mkrescue -o "$ISO_OUTPUT" "$ISO_DIR" \
 	-- -volid "$ISO_LABEL" \
 	-boot_image any mbr_force_bootable=on
 
+cleanup_mounts
+if findmnt -rnlo TARGET | grep -q "^$WORK_DIR/"; then
+	die "Mounts still active under $WORK_DIR, unmount them before rebuilding"
+fi
 rm -rf "$WORK_DIR"
 echo "Built: $ISO_OUTPUT"
