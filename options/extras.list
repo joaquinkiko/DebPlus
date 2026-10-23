@@ -1,8 +1,37 @@
 # menu|section|package|label|requires. menu is hardware or software.
 # Rows with the same section are grouped under one header, in file order.
-hardware|Printing|cups|Print server (CUPS)|-
+
+# Hardware
+hardware|Graphics|mesa-vulkan-drivers libgl1-mesa-dri|Mesa (Vulkan and OpenGL)|-
+hardware|Graphics|mesa-va-drivers|AMD video acceleration|-
+hardware|Graphics|intel-media-va-driver|Intel video acceleration|-
 hardware|Graphics|nvidia-detect nvidia-driver nvidia-settings|NVIDIA Drivers|non-free
+
+hardware|Power|tlp|TLP power management (laptops)|-
+hardware|Power|thermald|Intel thermal daemon|-
+
+hardware|Bluetooth|bluez|Bluetooth|-
+
+hardware|Printing|cups cups-filters cups-browsed avahi-daemon|Printing (CUPS)|-
+hardware|Printing|printer-driver-gutenprint|Inkjet Drivers|-
+hardware|Printing|hplip|HP Printer Drivers|-
+
+hardware|Sensors|lm-sensors|Hardware sensors|-
+
+# Software
 software|Browsers|firefox-esr|Firefox ESR|-
+
 software|Media|vlc|VLC media player|-
+software|Media|mpv|mpv player|-
+
 software|Office|libreoffice|LibreOffice suite|-
+
 software|Packages|snapd|Snapd|-
+
+software|Development|build-essential|Build tools|-
+
+software|Gaming|gamemode|GameMode|-
+software|Gaming|steam-installer|Steam|non-free
+
+software|Utilities|htop|Htop|-
+software|Utilities|btop|Btop|-
