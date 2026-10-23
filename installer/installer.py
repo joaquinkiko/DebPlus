@@ -68,10 +68,21 @@ def _make_filesystem(device, filesystem):
 	_run(commands[filesystem])
 
 
+def _wait_for_partitions(disk, expected, attempts=10):
+	for _ in range(attempts):
+		_try(f"partprobe {disk}")
+		parts = get_partitions(disk)
+		if len(parts) >= expected:
+			return parts
+		time.sleep(0.5)
+	die(f"Expected {expected} partitions on {disk}, found {len(parts)}")
+
+
 def partition_disk(config: Config):
 	msg(f"Partitioning {config.disk}...")
 	uefi = config.boot_mode == "uefi"
 	fs_hint = PARTED_FS_HINT[config.filesystem]
+	expected = 2 if uefi else 1
 
 	_run(f"wipefs -af {config.disk}", quiet=True)
 	if uefi:
@@ -80,10 +91,8 @@ def partition_disk(config: Config):
 	else:
 		layout = f"mklabel msdos mkpart primary {fs_hint} 1MiB 100% set 1 boot on"
 	_run(f"parted -s {config.disk} {layout}", quiet=True)
-	_try(f"partprobe {config.disk}")
-	time.sleep(1)
 
-	parts = get_partitions(config.disk)
+	parts = _wait_for_partitions(config.disk, expected)
 	esp_part, root_part = (parts[0], parts[1]) if uefi else (None, parts[0])
 
 	msg("Formatting...")
