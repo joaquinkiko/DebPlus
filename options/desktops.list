@@ -1,8 +1,8 @@
 # id|label|package|description. Package "-" installs no desktop.
 console|Console only|-|No desktop, text console only
-gnome|GNOME|task-gnome-desktop|Modern, polished, Wayland-first desktop
-kde|KDE Plasma|task-kde-desktop|Highly configurable, feature-rich desktop
-xfce|Xfce|task-xfce-desktop|Lightweight traditional desktop
-cinnamon|Cinnamon|task-cinnamon-desktop|Traditional layout, familiar to Windows users
-mate|MATE|task-mate-desktop|Lightweight GNOME 2 successor
-lxqt|LXQt|task-lxqt-desktop|Very lightweight Qt desktop
+#gnome|GNOME|task-gnome-desktop|Modern, polished, Wayland-first desktop
+#kde|KDE Plasma|task-kde-desktop|Highly configurable, feature-rich desktop
+#xfce|Xfce|task-xfce-desktop|Lightweight traditional desktop
+#cinnamon|Cinnamon|task-cinnamon-desktop|Traditional layout, familiar to Windows users
+#mate|MATE|task-mate-desktop|Lightweight GNOME 2 successor
+#lxqt|LXQt|task-lxqt-desktop|Very lightweight Qt desktop

@@ -1,5 +1,14 @@
 # id|label|repo|ref|description. repo is a git URL or path relative to project root starting with '/'.
 # ref is a git tag or branch, or "-" for the default branch; ignored for local directories.
 # Each source must have install.sh at its root. Ids must be unique across desktops.list.
-cosmic|Cosmic (Trixie)|/options/wm/cosmic|-|Unofficial JustAGuyLinux Trixie build of System76's Gnome-inspired Desktop
-
+cosmic|Cosmic (Trixie)|/cosmic|-|Unofficial JustAGuyLinux Trixie build of System76's Gnome-inspired Desktop
+cinnamon|Cinnamon|/cinnamon|-|Traditional layout, familiar to Windows users
+gnome|GNOME|/gnome|-|Modern, polished, Wayland-first desktop
+hyprland|Hyprland|/hyprland|-|Dynamic tiling Wayland compositor (trixie-backports)
+i3|i3|/i3|-|Tiling X11 window manager
+kde|KDE Plasma|/kde|-|Highly configurable, feature-rich desktop
+lxqt|LXQt|/lxqt|-|Very lightweight Qt desktop
+mate|MATE|/mate|-|Lightweight GNOME 2 successor
+openbox|Openbox|/openbox|-|Stacking window manager, minimal
+sway|Sway|/sway|-|Tiling Wayland compositor, i3-compatible
+xfce|Xfce|/xfce|-|Lightweight traditional desktop

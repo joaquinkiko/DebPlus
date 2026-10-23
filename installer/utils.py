@@ -10,6 +10,7 @@ import time
 MNT = "/mnt/debplus"
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OPTIONS_DIR = os.path.join(ROOT_DIR, "options")
+WM_DIR = os.path.join(OPTIONS_DIR, "wm")
 DESKTOPS_PATH = os.path.join(OPTIONS_DIR, "desktops.list")
 WMS_PATH = os.path.join(OPTIONS_DIR, "wms.list")
 EXTRAS_PATH = os.path.join(OPTIONS_DIR, "extras.list")
@@ -62,9 +63,13 @@ def desktop_rows():
 
 
 def wm_rows():
-	"""(id, label, repo, ref, description) per window manager repo."""
-	return [(wm_id, label, repo if "://" in repo else os.path.join(ROOT_DIR, repo), ref, description)
-		for wm_id, label, repo, ref, description in _rows(WMS_PATH)]
+	"""(id, label, repo, ref, description) per window manager, with local repos resolved."""
+	rows = []
+	for wm_id, label, repo, ref, description in _rows(WMS_PATH):
+		if repo.startswith("/"):
+			repo = os.path.join(WM_DIR, repo.lstrip("/"))
+		rows.append((wm_id, label, repo, ref, description))
+	return rows
 
 
 def extras_rows():

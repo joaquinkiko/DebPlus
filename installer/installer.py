@@ -266,16 +266,6 @@ def create_users(config: Config):
 
 # ── Desktop, window manager, optional packages ────────────────────────
 
-def install_desktop(config: Config):
-	package = next((pkg for desktop_id, _, pkg, _description in desktop_rows()
-	                if desktop_id == config.desktop), "-")
-	if package == "-":
-		return
-	msg(f"Installing desktop ({config.desktop})...")
-	_run(f"chroot {MNT} env DEBIAN_FRONTEND=noninteractive "
-	     f"apt-get install -y {package}")
-	ok("Desktop installed")
-
 
 def _fetch_wm_source(repo, ref, clone_path):
 	"""Place window manager source at clone_path inside the target. Returns success."""
@@ -299,26 +289,16 @@ def install_window_manager(config: Config) -> bool:
 	msg(f"Installing {label}...")
 
 	clone_path = f"/tmp/wm-{wm_id}"
-	sudoers_path = f"{MNT}/etc/sudoers.d/99-debplus-wm"
-	steps = [
-		f"chroot {MNT} chown -R {config.username}:{config.username} {clone_path}",
-		f"chroot {MNT} runuser -l {config.username} -c 'cd {clone_path} && bash install.sh'",
-	]
 	try:
-		with open(sudoers_path, "w") as sudoers_file:
-			sudoers_file.write(f"{config.username} ALL=(ALL) NOPASSWD: ALL\n")
-		os.chmod(sudoers_path, 0o440)
 		if not _fetch_wm_source(repo, ref, clone_path):
 			print(f"  {RED}{label} source unavailable.{NC}")
 			return False
-		for step in steps:
-			if subprocess.run(step, shell=True).returncode != 0:
-				print(f"  {RED}{label} failed. Fix it from Shell, or rerun its install.sh.{NC}")
-				return False
+		if subprocess.run(f"chroot {MNT} bash {clone_path}/install.sh", shell=True).returncode != 0:
+			print(f"  {RED}{label} failed. Fix it from Shell, or rerun its install.sh.{NC}")
+			return False
 		ok(f"{label} installed")
 		return True
 	finally:
-		_try(f"rm -f {sudoers_path}")
 		_try(f"rm -rf {MNT}{clone_path}")
 
 
@@ -408,7 +388,6 @@ def run_install(config: Config):
 		install_base(config)
 		configure_system(config)
 		create_users(config)
-		install_desktop(config)
 		if not install_window_manager(config):
 			failures.append("Window manager")
 		install_extras(config)
