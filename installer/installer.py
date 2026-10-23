@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
+import shlex
 
 from . import utils
 from .config import Config
@@ -303,12 +304,15 @@ def _fetch_wm_source(repo, ref, clone_path):
 			return False
 		return True
 	branch = "" if ref == "-" else f"--branch {ref}"
-	return subprocess.run(f"chroot {MNT} git clone --depth 1 {branch} {repo} {clone_path}",
-	                      shell=True).returncode == 0
+	return subprocess.run(f"chroot {MNT} git clone --depth 1 {branch} -- "
+	                      f"{shlex.quote(repo)} {clone_path}", shell=True).returncode == 0
 
 
 def install_window_manager(config: Config) -> bool:
-	entry = next((row for row in utils.wm_rows() if row[0] == config.desktop), None)
+	if config.desktop == "custom":
+		entry = ("custom", "Custom repo", config.custom_repo, "-", "")
+	else:
+		entry = next((row for row in utils.wm_rows() if row[0] == config.desktop), None)
 	if entry is None:
 		return True
 	wm_id, label, repo, ref, _description = entry

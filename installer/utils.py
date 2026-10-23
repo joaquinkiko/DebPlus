@@ -6,6 +6,8 @@ import os
 import re
 import subprocess
 import time
+import shutil
+from urllib.parse import urlparse
 
 MNT = "/mnt/debplus"
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -19,6 +21,31 @@ TARGET_PACKAGES_PATH = os.path.join(ROOT_DIR, "packages", "target.list")
 FIRMWARE_PATH = os.path.join(ROOT_DIR, "packages", "firmware.list")
 CUSTOM_PATH = os.path.join(OPTIONS_DIR, "custom.list")
 CUSTOM_DIR = os.path.join(OPTIONS_DIR, "custom")
+REPO_SCHEMES = ("https", "http", "git")
+
+
+def check_repo(url):
+	"""(passed, message): URL is well-formed and git ls-remote can reach it."""
+	url = url.strip()
+	if not url or url.startswith("-"):
+		return False, "Invalid repository address"
+	is_scp_style = re.match(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:", url)
+	if not is_scp_style and urlparse(url).scheme not in REPO_SCHEMES:
+		return False, "Use https://, http://, git:// or user@host:path"
+	if not shutil.which("git"):
+		return False, "git is not installed on the live system"
+	environment = {**os.environ, "GIT_TERMINAL_PROMPT": "0",
+	               "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
+	try:
+		result = subprocess.run(["git", "ls-remote", "--exit-code", "--", url],
+		                        capture_output=True, text=True, timeout=20,
+		                        env=environment)
+	except subprocess.TimeoutExpired:
+		return False, "Timed out reaching the repository"
+	if result.returncode == 0:
+		return True, "Repository reachable"
+	detail = (result.stderr.strip().splitlines() or ["no refs found"])[-1]
+	return False, f"Cannot reach repository: {detail}"
 
 
 def custom_rows():

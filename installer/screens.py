@@ -377,6 +377,35 @@ def _choice_rows(app, choice_id, label, detail, description):
 	]
 
 
+def _custom_repo(app):
+	edit = SubmitEdit("  URL: ", app.config.custom_repo)
+	status = urwid.Text("")
+
+	def check(_=None):
+		url = edit.edit_text.strip()
+		status.set_text(("warning", "  Checking..."))
+		app.loop.draw_screen()
+		passed, message = utils.check_repo(url)
+		if passed:
+			app.config.custom_repo = url
+			_set(app, "desktop", "custom")
+		else:
+			status.set_text(("error", f"  {message}"))
+
+	urwid.connect_signal(edit, "activate", check)
+	items = [
+		urwid.Text(("label", "  Git URL (https, git, or user@host:path)")),
+		urwid.Divider(),
+		edit,
+		status,
+		urwid.Divider(),
+		_action(("bold", "  Check and use"), check),
+		urwid.Divider(),
+		_back_button(app),
+	]
+	app.show_screen(_screen("Custom Repo", items))
+
+
 def desktop(app):
 	items = []
 	for desktop_id, label, package, description in utils.desktop_rows():
@@ -386,6 +415,11 @@ def desktop(app):
 		wm_items += _choice_rows(app, wm_id, label, "", description)
 	if wm_items:
 		items += wm_items
+	items += [
+		_action("  Custom Repo", lambda _: _custom_repo(app)),
+		urwid.Text(("label", "      Any git repo with an install.sh at its root.")),
+		urwid.Divider(),
+	]
 	items += [
 		urwid.Text(("label", "  Default GUI environment.")),
 		urwid.Divider(),
@@ -536,7 +570,7 @@ def summary(app):
 		("Hostname",   config.hostname),
 		("User",       config.username),
 		("Root login", "yes" if config.root_pass else "disabled"),
-		("Desktop",    config.desktop),
+		("Desktop",    config.desktop_label()),
 		("Components", ", ".join(config.components) or "main only"),
 		("Hardware",   ", ".join(config.hardware_packages) or "none"),
 		("Software",   ", ".join(config.software_packages) or "none"),

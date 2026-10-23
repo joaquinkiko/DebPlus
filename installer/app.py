@@ -169,7 +169,7 @@ class App:
 			("Locale",     config.locale),
 			("Hostname",   config.hostname),
 			("User",       config.username),
-			("Desktop",    config.desktop),
+			("Desktop",    config.desktop_label()),
 			("Components",   ", ".join(["main"] + config.components)),
 			("Extras",     ", ".join(config.hardware_packages + config.software_packages)),
 			("Advanced",   ", ".join(config.advanced_labels())),
