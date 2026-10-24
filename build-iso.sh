@@ -103,7 +103,7 @@ apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/*
 SETUP
 
-chmod +x "$ROOTFS_DIR/tmp/
+chmod +x "$ROOTFS_DIR/tmp/setup.sh"
 cp /etc/resolv.conf "$ROOTFS_DIR/etc/resolv.conf"
 chroot "$ROOTFS_DIR" env MIRROR="$MIRROR" SUITE="$SUITE" /tmp/setup.sh
 : > "$ROOTFS_DIR/etc/resolv.conf"
