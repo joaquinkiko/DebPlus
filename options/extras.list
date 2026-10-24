@@ -21,11 +21,20 @@ hardware|Sensors|lm-sensors|Hardware sensors|-
 # Software
 software|Browsers|firefox-esr|Firefox ESR|-
 
+software|Terminals|kitty|Kitty|-
+
 software|File Manager|thunar|Thunar|-
 software|File Manager|nemo|Nemo|-
 
 software|Media|vlc|VLC media player|-
-software|Media|mpv|mpv player|-
+software|Media|mpv|MPV media player|-
+software|Media|imv|IMV Image Viewer|-
+
+software|Media Editor|gimp|Gimp|-
+software|Media Editor|krita|Krita|-
+software|Media Editor|darktable|Darktable|-
+software|Media Editor|blender|Blender|-
+software|Media Editor|audacity|Audacity|-
 
 software|Office|libreoffice|LibreOffice suite|-
 
@@ -35,6 +44,7 @@ software|Development|build-essential|Build tools|-
 
 software|Gaming|gamemode|GameMode|-
 software|Gaming|steam-installer|Steam|non-free
+software|Gaming|lutris|Lutris|-
 
 software|Utilities|htop|Htop|-
 software|Utilities|btop|Btop|-
@@ -43,3 +53,9 @@ software|Fonts|fonts-font-awesome|Font Awesome|-
 
 software|Text Editing|vim|Vim|-
 software|Text Editing|neovim|NeoVim|-
+
+software|Downloading|qbittorrent|QBitTorrent|-
+
+software|Utilities|wine|Wine (Windows Execution)|-
+software|Utilities|ufw|ufw (Firewall)|-
+
