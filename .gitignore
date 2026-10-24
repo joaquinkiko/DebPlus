@@ -1,2 +1,3 @@
 installer/__pycache__/
 *.iso
+.iso-work/
