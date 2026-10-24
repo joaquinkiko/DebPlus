@@ -21,6 +21,9 @@ hardware|Sensors|lm-sensors|Hardware sensors|-
 # Software
 software|Browsers|firefox-esr|Firefox ESR|-
 
+software|File Manager|thunar|Thunar|-
+software|File Manager|nemo|Nemo|-
+
 software|Media|vlc|VLC media player|-
 software|Media|mpv|mpv player|-
 
