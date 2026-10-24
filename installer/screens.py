@@ -29,7 +29,7 @@ def _on_multiarch(_box, state, app):
 
 def _requirements_met(config, requirement):
 	needed = {name for name in requirement.split(",") if name != "-"}
-	available = set(config.components)
+	available = set(config.components) | set(config.hardware_packages) | set(config.software_packages)
 	if config.multiarch_i386:
 		available.add("i386")
 	return needed <= available
@@ -478,12 +478,17 @@ def _on_archive_toggle(box, state, user_data):
 		_drop_unavailable(user_data[0].config)
 
 
+def _on_package_toggle(box, state, user_data):
+	_on_toggle(box, state, user_data)
+	_drop_unavailable(user_data[0].config)
+
+
 def _package_row(app, menu, package, label, requirement):
 	chosen = getattr(app.config, f"{menu}_packages")
 	if _requirements_met(app.config, requirement):
 		return urwid.CheckBox(
 			f"  {label}", state=package in chosen,
-			on_state_change=_on_toggle,
+			on_state_change=_on_package_toggle,
 			user_data=(app, f"{menu}_packages", package))
 	return urwid.Text(("unset", f"  {label}  requires {requirement}"))
 
