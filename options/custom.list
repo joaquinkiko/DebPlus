@@ -2,3 +2,4 @@
 waterfox|software|Browsers|Waterfox|waterfox.sh|-
 flatpak|software|Packages|Flatpak|flatpak.sh|-
 steam|software|Gaming|Steam|steam.sh|contrib,i386
+heroic|software|Gaming|Heroic|heroic.sh|flatpak
