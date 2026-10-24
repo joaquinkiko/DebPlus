@@ -4,56 +4,163 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get install -y --no-install-recommends sway swaybg swayidle swaylock \
-	xwayland waybar wofi foot mako-notifier grim slurp wl-clipboard \
+	xwayland waybar wofi kitty mako-notifier grim slurp \
 	xdg-desktop-portal-wlr xdg-desktop-portal-gtk libpam-systemd \
-	fonts-font-awesome fonts-dejavu-core lightdm lightdm-gtk-greeter
+	fonts-recommended lightdm lightdm-gtk-greeter autotiling \
+	pipewire pipewire-pulse wireplumber \
+	xdg-user-dirs-gtk
 
 install -D /dev/null /etc/sway/config
 cat > /etc/sway/config << 'SWAY'
+# sway config
+
+### Variables
 set $mod Mod4
-set $term foot
+set $smod Shift
+set $term kitty
 set $menu wofi --show drun
 set $lock swaylock -f -c 000000
+set $browser nemo
+set $explorer firefox-esr
 
-font pango:monospace 10
-floating_modifier $mod
+set $wallpaper ~/path/to/wallpaper
 
+set $ws1  " 1 "
+set $ws2  " 2 "
+set $ws3  " 3 "
+set $ws4  " 4 "
+set $ws5  " 5 "
+set $ws6  " 6 "
+set $ws7  " 7 "
+set $ws8  " 8 "
+set $ws9  " 9 "
+set $ws10 " 10 "
+
+### Wallpaper
+# output * bg $wallpaper fill
+
+### Executions
 exec dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=sway
-exec waybar
 exec mako
-exec swayidle -w timeout 600 'swaylock -f -c 000000' timeout 900 'swaymsg "output * power off"' resume 'swaymsg "output * power on"' before-sleep 'swaylock -f -c 000000'
+exec autotiling
 
-bindsym $mod+Return exec $term
+bar {
+	swaybar_command waybar
+}
+
+### Idle configuration
+# Lock after 10 minutes idle
+# Monitor off after 15 min idle, back on at the first input
+exec swayidle -w \
+    timeout 600 '$lock' \
+    900 'swaymsg "output * power off"' \
+        resume 'swaymsg "output * power on"' \
+    before-sleep '$lock'
+
+### Input configuration
+input type:touchpad {
+    dwt enabled
+    tap enabled
+    natural_scroll enabled
+    middle_emulation enabled
+}
+
+input type:keyboard {
+    xkb_numlock enabled
+    repeat_delay 300
+    repeat_rate 50
+}
+
+### Appearance
+font pango:monospace 12
+
+### Key bindings
+
+# Basic
 bindsym $mod+d exec $menu
-bindsym $mod+Shift+q kill
-bindsym $mod+Shift+x exec $lock
-bindsym $mod+Shift+e exec swaynag -t warning -m 'Exit sway?' -B 'Yes' 'swaymsg exit'
-bindsym $mod+Shift+c reload
-bindsym Print exec grim -g "$(slurp)" - | wl-copy
+bindsym $mod+Return exec $term
+bindsym $mod+b exec $explorer
+bindsym $mod+b exec $browser
+floating_modifier $mod normal
+bindsym $mod+$smod+q kill
+bindsym $mod+$smod+l exec $lock
+bindsym $mod+$smod+e exec swaynag -t warning -m 'You pressed the exit shortcut. Do you really want to exit sway? This will end your Wayland session.' -B 'Yes, exit sway' 'swaymsg exit'
+bindsym $mod+$smod+c reload
 
-bindsym $mod+h focus left
-bindsym $mod+j focus down
-bindsym $mod+k focus up
-bindsym $mod+l focus right
-bindsym $mod+Shift+h move left
-bindsym $mod+Shift+j move down
-bindsym $mod+Shift+k move up
-bindsym $mod+Shift+l move right
-bindsym $mod+b splith
-bindsym $mod+v splitv
-bindsym $mod+f fullscreen toggle
-bindsym $mod+Shift+space floating toggle
+# Switch to workspace n
+bindsym $mod+1 workspace $ws1
+bindsym $mod+2 workspace $ws2
+bindsym $mod+3 workspace $ws3
+bindsym $mod+4 workspace $ws4
+bindsym $mod+5 workspace $ws5
+bindsym $mod+6 workspace $ws6
+bindsym $mod+7 workspace $ws7
+bindsym $mod+8 workspace $ws8
+bindsym $mod+9 workspace $ws9
+bindsym $mod+0 workspace $ws10
 
-bindsym $mod+1 workspace number 1
-bindsym $mod+2 workspace number 2
-bindsym $mod+3 workspace number 3
-bindsym $mod+4 workspace number 4
-bindsym $mod+5 workspace number 5
-bindsym $mod+Shift+1 move container to workspace number 1
-bindsym $mod+Shift+2 move container to workspace number 2
-bindsym $mod+Shift+3 move container to workspace number 3
-bindsym $mod+Shift+4 move container to workspace number 4
-bindsym $mod+Shift+5 move container to workspace number 5
+# Move focused container to workspace n
+bindsym $mod+$smod+1 move container to workspace $ws1
+bindsym $mod+$smod+2 move container to workspace $ws2
+bindsym $mod+$smod+3 move container to workspace $ws3
+bindsym $mod+$smod+4 move container to workspace $ws4
+bindsym $mod+$smod+5 move container to workspace $ws5
+bindsym $mod+$smod+6 move container to workspace $ws6
+bindsym $mod+$smod+7 move container to workspace $ws7
+bindsym $mod+$smod+8 move container to workspace $ws8
+bindsym $mod+$smod+9 move container to workspace $ws9
+bindsym $mod+$smod+0 move container to workspace $ws10
+
+# Navigate focus
+bindsym $mod+left focus left
+bindsym $mod+down focus down
+bindsym $mod+up focus up
+bindsym $mod+right focus right
+
+# Move focused
+bindsym $mod+Shift+left move left
+bindsym $mod+Shift+down move down
+bindsym $mod+Shift+up move up
+bindsym $mod+Shift+right move right
+
+# Scratchpad
+bindsym $mod+$smod+minus move scratchpad
+bindsym $mod+minus scratchpad show
+
+# Resizing
+mode "resize" {
+    bindsym Left resize shrink width 10px
+    bindsym Down resize grow height 10px
+    bindsym Up resize shrink height 10px
+    bindsym Right resize grow width 10px
+
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+}
+bindsym $mod+r mode "resize"
+
+# Audio via PulseAudio
+bindsym --locked XF86AudioMute exec pactl set-sink-mute \@DEFAULT_SINK@ toggle
+bindsym --locked XF86AudioLowerVolume exec pactl set-sink-volume \@DEFAULT_SINK@ -5%
+bindsym --locked XF86AudioRaiseVolume exec pactl set-sink-volume \@DEFAULT_SINK@ +5%
+bindsym --locked XF86AudioMicMute exec pactl set-source-mute \@DEFAULT_SOURCE@ toggle
+
+# Media via playerctl
+bindsym --locked XF86AudioPlay exec playerctl play-pause
+bindsym --locked XF86AudioPause exec playerctl play-pause
+bindsym --locked XF86AudioPrev exec playerctl previous
+bindsym --locked XF86AudioNext exec playerctl next
+bindsym --locked XF86AudioStop exec playerctl stop
+
+# Brightness via brightnessctl
+bindsym --locked XF86MonBrightnessDown exec brightnessctl set 5%-
+bindsym --locked XF86MonBrightnessUp exec brightnessctl set 5%+
+
+# Screenshot via grim
+bindsym Print exec grim -g \"\$(slurp)\" $HOME/Pictures/\$(date +%F_%T).png
+
 SWAY
+
+xdg-user-dirs-update
 
 apt-get clean
