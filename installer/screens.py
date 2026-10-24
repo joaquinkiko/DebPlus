@@ -22,6 +22,19 @@ FILESYSTEM_CHOICES = [
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
+def _on_multiarch(_box, state, app):
+	app.config.multiarch_i386 = state
+	_drop_unavailable(app.config)
+
+
+def _requirements_met(config, requirement):
+	needed = {name for name in requirement.split(",") if name != "-"}
+	available = set(config.components)
+	if config.multiarch_i386:
+		available.add("i386")
+	return needed <= available
+
+
 def _screen(title, items):
 	widgets = [urwid.Text(("title", f"\n  {title}\n")), urwid.Divider()] + items
 	return urwid.ListBox(urwid.SimpleFocusListWalker(widgets))
@@ -451,13 +464,12 @@ def packages_menu(app):
 # ── Hardware and Software (optional packages) ──────────────────────────
 
 def _drop_unavailable(config):
-	"""Remove selected packages whose required archive is no longer enabled."""
+	"""Remove selected packages whose requirements are no longer met."""
 	requirements = utils.package_requirements()
-	available = {"-", *config.components}
 	for attribute in ("hardware_packages", "software_packages"):
 		chosen = getattr(config, attribute)
 		chosen[:] = [package for package in chosen
-		if requirements.get(package, "-") in available]
+		             if _requirements_met(config, requirements.get(package, "-"))]
 
 
 def _on_archive_toggle(box, state, user_data):
@@ -468,7 +480,7 @@ def _on_archive_toggle(box, state, user_data):
 
 def _package_row(app, menu, package, label, requirement):
 	chosen = getattr(app.config, f"{menu}_packages")
-	if requirement == "-" or requirement in app.config.components:
+	if _requirements_met(app.config, requirement):
 		return urwid.CheckBox(
 			f"  {label}", state=package in chosen,
 			on_state_change=_on_toggle,
@@ -523,8 +535,8 @@ def advanced(app):
 	config = app.config
 	items = [
 		urwid.CheckBox("  32-bit (i386) support", state=config.multiarch_i386,
-		               on_state_change=_on_flag,
-		               user_data=(app, "multiarch_i386")),
+		               on_state_change=_on_multiarch,
+		               user_data=app),
 		urwid.Text(("label", "      Adds the i386 architecture for 32-bit libraries and apps.")),
 		urwid.Divider(),
 		urwid.CheckBox("  Backports repository", state=config.backports_repo,
