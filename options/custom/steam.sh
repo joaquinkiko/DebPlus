@@ -4,13 +4,20 @@
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
+# Check if we're using backports
 target_flag=""
-if [ -n "$DEBPLUS_BACKPORTS_SUITE" ]; then
-	target_flag="-t $DEBPLUS_BACKPORTS_SUITE"
+backportsSuite="trixie-backports"
+sourcesPaths="/etc/apt/sources.list /etc/apt/sources.list.d/*"
+if grep -hsv '^[[:space:]]*#' $sourcesPaths | grep -q "$backportsSuite"; then
+	target_flag="-t trixie-backports"
 fi
 
-dpkg --add-architecture i386
-apt-get update
+# Ensure i386 is activeuser
+if ! dpkg --print-foreign-architectures | grep -qx 'i386'; then
+	dpkg --add-architecture i386
+    apt-get update
+fi
+
 
 install_steam() {
 	apt-get install -y $target_flag steam-installer steam-devices
