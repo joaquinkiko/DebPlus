@@ -40,3 +40,6 @@ software|Utilities|htop|Htop|-
 software|Utilities|btop|Btop|-
 
 software|Fonts|fonts-font-awesome|Font Awesome|-
+
+software|Text Editing|vim|Vim|-
+software|Text Editing|neovim|NeoVim|-
