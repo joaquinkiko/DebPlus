@@ -8,7 +8,13 @@ apt-get install -y --no-install-recommends sway swaybg swayidle swaylock \
 	xdg-desktop-portal-wlr xdg-desktop-portal-gtk libpam-systemd \
 	fonts-recommended lightdm lightdm-gtk-greeter autotiling \
 	pipewire pipewire-pulse wireplumber \
-	xdg-user-dirs-gtk
+	brightnessctl playerctl \
+	xdg-user-dirs-
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WALLPAPER_NAME="sway.png"
+WALLPAPER_PATH="/usr/share/backgrounds/wallpaper.png"
+install -Dm644 "$SCRIPT_DIR/$WALLPAPER_NAME" "$WALLPAPER_PATH"
 
 install -D /dev/null /etc/sway/config
 cat > /etc/sway/config << 'SWAY'
@@ -20,10 +26,10 @@ set $smod Shift
 set $term kitty
 set $menu wofi --show drun
 set $lock swaylock -f -c 000000
-set $browser nemo
-set $explorer firefox-esr
+set $browser firefox-esr
+set $explorer nemo
 
-set $wallpaper ~/path/to/wallpaper
+set $wallpaper /usr/share/backgrounds/wallpaper.png
 
 set $ws1  " 1 "
 set $ws2  " 2 "
@@ -37,12 +43,13 @@ set $ws9  " 9 "
 set $ws10 " 10 "
 
 ### Wallpaper
-# output * bg $wallpaper fill
+output * bg $wallpaper fill
 
 ### Executions
 exec dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=sway
 exec mako
 exec autotiling
+exec xdg-user-dirs-update
 
 bar {
 	swaybar_command waybar
@@ -79,7 +86,7 @@ font pango:monospace 12
 # Basic
 bindsym $mod+d exec $menu
 bindsym $mod+Return exec $term
-bindsym $mod+b exec $explorer
+bindsym $mod+e exec $explorer
 bindsym $mod+b exec $browser
 floating_modifier $mod normal
 bindsym $mod+$smod+q kill
@@ -127,6 +134,12 @@ bindsym $mod+Shift+right move right
 bindsym $mod+$smod+minus move scratchpad
 bindsym $mod+minus scratchpad show
 
+# Layout
+bindsym $mod+h split h
+bindsym $mod+v split v
+bindsym $mod+f fullscreen toggle
+bindsym $mod+$smod+space floating toggle
+
 # Resizing
 mode "resize" {
     bindsym Left resize shrink width 10px
@@ -160,7 +173,5 @@ bindsym --locked XF86MonBrightnessUp exec brightnessctl set 5%+
 bindsym Print exec grim -g \"\$(slurp)\" $HOME/Pictures/\$(date +%F_%T).png
 
 SWAY
-
-xdg-user-dirs-update
 
 apt-get clean

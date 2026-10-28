@@ -7,6 +7,7 @@ apt-get install -y --no-install-recommends xserver-xorg xinit i3-wm i3status \
 	i3lock xss-lock rofi dunst picom alacritty feh maim \
 	libpam-systemd fonts-recommended lightdm lightdm-gtk-greeter \
 	pipewire pipewire-pulse wireplumber \
+	brightnessctl playerctl \
 	xdg-user-dirs-gtk
 
 install -D /dev/null /etc/i3/config
@@ -19,10 +20,10 @@ set $smod Shift
 set $term alacritty
 set $menu rofi -show drun
 set $lock i3lock -n -c 000000
-set $browser nemo
-set $explorer firefox-esr
+set $browser firefox-esr
+set $explorer nemo
 
-set $wallpaper ~/path/to/wallpaper
+set $wallpaper /usr/share/backgrounds/wallpaper.png
 
 set $ws1  " 1 "
 set $ws2  " 2 "
@@ -36,11 +37,12 @@ set $ws9  " 9 "
 set $ws10 " 10 "
 
 ### Wallpaper
-# exec --no-startup-id feh --bg-fill $wallpaper
+exec --no-startup-id feh --bg-fill $wallpaper
 
 ### Executions
 exec --no-startup-id picom -b
 exec --no-startup-id xss-lock --transfer-sleep-lock -- $lock
+exec --no-startup-id xdg-user-dirs-update
 
 bar {
 	status_command i3status
@@ -53,7 +55,7 @@ font pango:monospace 12
 
 bindsym $mod+d exec $menu
 bindsym $mod+Return exec $term
-bindsym $mod+b exec $explorer
+bindsym $mod+e exec $explorer
 bindsym $mod+b exec $browser
 floating_modifier $mod normal
 bindsym $mod+$smod+q kill
@@ -99,7 +101,7 @@ bindsym $mod+Shift+up move up
 bindsym $mod+Shift+right move right
 
 # Layout
-bindsym $mod+b split h
+bindsym $mod+h split h
 bindsym $mod+v split v
 bindsym $mod+f fullscreen toggle
 bindsym $mod+$smod+space floating toggle
@@ -137,7 +139,5 @@ bindsym --locked XF86MonBrightnessUp exec brightnessctl set 5%+
 bindsym Print exec --no-startup-id maim -s $HOME/Pictures/$(date +%F_%T).png
 
 I3
-
-xdg-user-dirs-update
 
 apt-get clean

@@ -6,7 +6,8 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get install -y --no-install-recommends xserver-xorg openbox \
 	rofi dunst picom alacritty i3lock xss-lock feh maim \
 	libpam-systemd fonts-recommended lightdm lightdm-gtk-greeter \
-	pipewire pipewire-pulse  \
+	pipewire pipewire-pulse wireplumber  \
+	brightnessctl playerctl \
 	xdg-user-dirs-gtk
 
 sed -i 's#</keyboard>#\
@@ -22,10 +23,9 @@ sed -i 's#</keyboard>#\
 install -D /dev/null /etc/xdg/openbox/autostart
 cat > /etc/xdg/openbox/autostart << 'AUTOSTART'
 picom -b &
-feh --no-fehbg --bg-fill /path/to/wallpaper &
+xdg-user-dirs-update &
+feh --no-fehbg --bg-fill /usr/share/backgrounds/wallpaper.png &
 xss-lock --transfer-sleep-lock -- i3lock -n -c 000000 &
 AUTOSTART
-
-xdg-user-dirs-update
 
 apt-get clean

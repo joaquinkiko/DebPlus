@@ -24,10 +24,14 @@ apt-get install -y --no-install-recommends -t "$backports_suite" \
 apt-get install -y --no-install-recommends waybar wofi kitty mako-notifier \
 	grim slurp wl-clipboard fonts-dejavu-core \
 	libpam-systemd lightdm lightdm-gtk-greeter \
+	pipewire pipewire-pulse wireplumber \
+	brightnessctl playerctl \
 	xdg-user-dirs-gtk
 
-mkdir -p /etc/hypr
-cat > /etc/hypr/hyprland.lua << 'HYPR'
+USER_NAME="$(getent passwd 1000 | cut -d: -f1)"
+USER_HOME="/home/$USER_NAME"
+mkdir -p "$USER_HOME/.config/hypr"
+cat > "$USER_HOME/.config/hypr/hyprland.lua" << 'HYPR'
 -- Hyprland config
 
 -- Monitors
@@ -43,7 +47,7 @@ hl.monitor({
 -- Programs
 
 local term = "kitty"
-local fileManager = "dolphin"
+local fileManager = "nemo"
 local menu = "wofi --show drun"
 
 -- Environment Variables
@@ -51,6 +55,20 @@ local menu = "wofi --show drun"
 -- See https://wiki.hypr.land/configuring/core/environment-variables/
 hl.env("XCURSOR_SIZE", "24")
 hl.env("HYPRCURSOR_SIZE", "24")
+
+-- Startup
+
+local wallpaperPath = "/usr/share/backgrounds/wallpaper.png"
+local polkitAgent = "/usr/lib/hyprpolkitagent/hyprpolkitagent"
+
+hl.on("hyprland.start", function()
+	hl.exec_cmd("xdg-user-dirs-update")
+	hl.exec_cmd("swaybg -m fill -i " .. wallpaperPath)
+	hl.exec_cmd("waybar")
+	hl.exec_cmd("mako")
+	hl.exec_cmd("hypridle")
+	hl.exec_cmd(polkitAgent)
+end)
 
 -- Look and Feel
 
@@ -186,19 +204,15 @@ hl.gesture({
     action = "workspace"
 })
 
--- Example per-device config
--- See https://wiki.hypr.land/configuring/core/devices/ for more
-hl.device({
-    name        = "epic-mouse-v1",
-    sensitivity = -0.5,
-})
-
 -- Keybindings
+
+hl.bind(mainMod .. " + SHIFT + L", hl.dsp.exec_cmd("hyprlock"))
+hl.bind("Print", hl.dsp.exec_cmd([[sh -c 'grim -g "$(slurp)" "$HOME/Pictures/$(date +%F_%T).png"']]))
 
 local mainMod = "SUPER" -- Sets "Windows" key as main modifier
 
 -- Example binds, see https://wiki.hypr.land/configuring/core/binds/ for more
-hl.bind(mainMod .. " + Q", hl.dsp.exec_cmd(terminal))
+hl.bind(mainMod .. " + Q", hl.dsp.exec_cmd(term))
 local closeWindowBind = hl.bind(mainMod .. " + C", hl.dsp.window.close())
 -- closeWindowBind:set_enabled(false)
 hl.bind(mainMod .. " + M", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch 'hl.dsp.exit()'"))
@@ -294,7 +308,6 @@ hl.window_rule({
 })
 
 HYPR
-
-xdg-user-dirs-update
+chown -R "$USER_NAME:$USER_NAME" "$USER_HOME/.config"
 
 apt-get clean
