@@ -1,0 +1,24 @@
+{
+	"layer": "top",
+	"position": "bottom",
+	"mode": "hide",
+	"exclusive": false,
+	"start_hidden": true,
+	"height": 48,
+	"margin-bottom": 6,
+	"modules-left": [],
+	"modules-center": ["wlr/taskbar"],
+	"modules-right": ["pulseaudio", "clock"],
+	"wlr/taskbar": {
+		"format": "{icon}",
+		"icon-size": 28,
+		"on-click": "activate"
+	},
+	"pulseaudio": {
+		"format": "{volume}%",
+		"on-click": "pavucontrol"
+	},
+	"clock": {
+		"format": "{:%H:%M}"
+	}
+}

@@ -16,3 +16,4 @@ hyprland|Hyprland|/hyprland|-|Dynamic tiling Wayland compositor (backport)
 i3|i3|/i3|-|Tiling X11 window manager
 openbox|Openbox|/openbox|-|Stacking window manager, minimal
 sway|Sway|/sway|-|Tiling Wayland compositor, i3-compatible
+labwc|labwc|/labwc|-|Wayland stacking compositor
