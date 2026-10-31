@@ -34,7 +34,9 @@ def _on_multiarch(_box, state, app):
 
 def _requirements_met(config, requirement):
 	needed = {name for name in requirement.split(",") if name != "-"}
-	available = set(config.components) | set(config.hardware_packages) | set(config.software_packages)
+	available = set()
+	for entry in set(config.components) | set(config.hardware_packages) | set(config.software_packages):
+		available |= set(entry.split())
 	if config.multiarch_i386:
 		available.add("i386")
 	return needed <= available
