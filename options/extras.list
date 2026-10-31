@@ -43,6 +43,8 @@ software|Packages|snapd|Snapd|-
 software|Development|build-essential|Build tools|-
 
 software|Gaming|gamemode|GameMode|-
+software|Gaming|mangohud|MangoHUD|-
+software|Gaming|gamescope|gamescope|contrib
 software|Gaming|lutris|Lutris|-
 
 software|Utilities|htop|Htop|-
