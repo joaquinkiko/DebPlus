@@ -247,6 +247,9 @@ def configure_system(config: Config):
 	with open(f"{MNT}/etc/default/keyboard", "w") as keyboard_file:
 		keyboard_file.write(keyboard_config(config.keymap))
 
+	with open(f"{MNT}/etc/sysctl.d/99-swappiness.conf", "w") as swappiness_file:
+		swappiness_file.write(f"vm.swappiness={config.swappiness}\n")
+
 	_run(f"chroot {MNT} systemctl enable NetworkManager systemd-timesyncd")
 	copy_wifi_profiles()
 	ok("System configured")

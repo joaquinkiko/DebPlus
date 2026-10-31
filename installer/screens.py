@@ -22,6 +22,11 @@ FILESYSTEM_CHOICES = [
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
+def _on_swappiness(_edit, new_text, app):
+	if new_text.isdigit() and int(new_text) <= 100:
+		app.config.swappiness = int(new_text)
+
+
 def _on_multiarch(_box, state, app):
 	app.config.multiarch_i386 = state
 	_drop_unavailable(app.config)
@@ -568,6 +573,13 @@ def advanced(app):
 			urwid.Text(("unset", "  Backports kernel and Mesa require the backports repository.")),
 			urwid.Divider(),
 		]
+	swappiness_edit = urwid.Edit("  Swappiness (0-100): ", str(config.swappiness))
+	urwid.connect_signal(swappiness_edit, "change", _on_swappiness, app)
+	items += [
+		swappiness_edit,
+		urwid.Text(("label", "      Lower keeps more in RAM. 10 suits gaming, 60 is the default.")),
+		urwid.Divider(),
+	]
 	items.append(_back_button(app))
 	app.show_screen(_screen("Advanced", items),
 	                footer_text="  ↑↓ navigate  Space toggle  Esc back")

@@ -29,6 +29,7 @@ class Config:
 	backports_repo: bool = False
 	backports_kernel: bool = False
 	backports_mesa: bool = False
+	swappiness: int = 60
 
 	def missing_count(self) -> int:
 		return sum(1 for name in REQUIRED_FIELDS if not getattr(self, name))
@@ -46,6 +47,8 @@ class Config:
 			labels.append("backports kernel")
 		if self.backports_mesa:
 			labels.append("backports mesa")
+		if self.swappiness != 60:
+			labels.append(f"swappiness {self.swappiness}")
 		return labels
 
 	def desktop_label(self) -> str:
