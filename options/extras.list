@@ -3,20 +3,32 @@
 
 # Hardware
 hardware|Graphics|mesa-vulkan-drivers libgl1-mesa-dri|Mesa (Vulkan and OpenGL)|-
-hardware|Graphics|mesa-va-drivers|AMD video acceleration|-
-hardware|Graphics|intel-media-va-driver|Intel video acceleration|-
-hardware|Graphics|nvidia-detect nvidia-driver nvidia-settings|NVIDIA Drivers|non-free
+hardware|Graphics|firmware-amd-graphics mesa-va-drivers|AMD GPU firmware|non-free-firmware
+hardware|Graphics|firmware-intel-graphics intel-media-va-driver|Intel GPU firmware|non-free-firmware
+hardware|Graphics|firmware-nvidia-graphics nvidia-detect nvidia-driver|NVIDIA driver|non-free-firmware,non-free
+hardware|Graphics|nvidia-settings|NVIDIA settings panel|nvidia-driver
+
+hardware|CPU|intel-microcode|Intel CPU microcode|non-free-firmware
+hardware|CPU|amd64-microcode|AMD CPU microcode|non-free-firmware
+
+hardware|Audio|sof-firmware|Intel audio firmware (SOF)|non-free-firmware
 
 hardware|Power|tlp|TLP power management (laptops)|-
 hardware|Power|thermald|Intel thermal daemon|-
 
 hardware|Bluetooth|bluez|Bluetooth|-
+hardware|Bluetooth|firmware-realtek firmware-atheros firmware-mediatek|Bluetooth firmware|non-free-firmware
 
-hardware|Printing|cups cups-filters cups-browsed avahi-daemon|Printing (CUPS)|-
-hardware|Printing|printer-driver-gutenprint|Inkjet Drivers|-
-hardware|Printing|hplip|HP Printer Drivers|-
+hardware|Printing|cups cups-filters cups-browsed avahi-daemon|Printing service (CUPS)|-
+hardware|Printing|printer-driver-gutenprint hplip printer-driver-escpr printer-driver-brlaser printer-driver-splix|Printer drivers|cups
+
+hardware|Scanning|sane-utils|Scanner support|-
 
 hardware|Sensors|lm-sensors|Hardware sensors|-
+
+hardware|Wi-Fi|firmware-iwlwifi firmware-realtek firmware-atheros firmware-brcm80211 firmware-mediatek|Wi-Fi firmware|non-free-firmware
+
+hardware|Firmware|firmware-misc-nonfree|Misc hardware firmware|non-free-firmware
 
 # Software
 software|Browsers|firefox-esr|Firefox ESR|-
@@ -25,6 +37,7 @@ software|Terminals|kitty|Kitty|-
 
 software|File Manager|thunar|Thunar|-
 software|File Manager|nemo|Nemo|-
+software|File Manager|dolphin|Dolphin|-
 
 software|Media|vlc|VLC media player|-
 software|Media|mpv|MPV media player|-
@@ -38,18 +51,20 @@ software|Media Editor|audacity|Audacity|-
 
 software|Office|libreoffice|LibreOffice suite|-
 
+software|Communication|thunderbird|Thunderbird|-
+
 software|Packages|snapd|Snapd|-
 
 software|Development|build-essential|Build tools|-
+software|Development|gcc g++ cmake gdb clang pkg-config|C/C++ Essentials|-
+software|Development|python3 python3-pip python3-venv python3-dev|Python3 Essentials|-
 
 software|Gaming|gamemode|GameMode|-
 software|Gaming|mangohud|MangoHUD|-
 software|Gaming|gamescope|gamescope|contrib
 software|Gaming|lutris|Lutris|-
 
-software|Utilities|htop|Htop|-
-software|Utilities|btop|Btop|-
-
+software|Fonts|fonts-recommended|Recommended Fonts|-
 software|Fonts|fonts-font-awesome|Font Awesome|-
 
 software|Text Editing|vim|Vim|-
@@ -57,6 +72,9 @@ software|Text Editing|neovim|NeoVim|-
 
 software|Downloading|qbittorrent|QBitTorrent|-
 
+software|Utilities|htop|Htop|-
+software|Utilities|btop|Btop|-
+software|Utilities|tmux|Terminal Multiplexer|-
 software|Utilities|wine|Wine (Windows Execution)|-
 software|Utilities|ufw|ufw (Firewall)|-
-
+software|Utilities|zip unzip|Archive Tools|-

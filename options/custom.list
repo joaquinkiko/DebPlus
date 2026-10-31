@@ -1,5 +1,7 @@
 # id|menu|section|label|script|requires. Script lives in options/custom/ and runs inside the target chroot.
 waterfox|software|Browsers|Waterfox|waterfox.sh|-
+brave|software|Browsers|Brave|brave.sh|-
 flatpak|software|Packages|Flatpak|flatpak.sh|-
 steam|software|Gaming|Steam|steam.sh|contrib,i386
 heroic|software|Gaming|Heroic|heroic.sh|flatpak
+sublime|software|Text Editing|Sublime|sublime.sh|-

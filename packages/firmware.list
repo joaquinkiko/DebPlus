@@ -1,12 +1,2 @@
 # Require non-free-firmware in apt sources. Installed only when that component is ticked.
-firmware-iwlwifi
-firmware-realtek
-firmware-atheros
-firmware-brcm80211
-firmware-mediatek
-firmware-misc-nonfree
-firmware-amd-graphics
-firmware-intel-graphics
-firmware-nvidia-graphics
-intel-microcode
-amd64-microcode
+
