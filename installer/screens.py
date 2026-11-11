@@ -452,15 +452,87 @@ def partition_layout(app, error=""):
 
 # ── Filesystem ─────────────────────────────────────────────────────────
 
+def _choose_filesystem(app, name):
+	app.config.filesystem = name
+	if name != "btrfs":
+		app.config.snapper = False
+	filesystem(app)
+
+
+def _on_snapper(_box, state, app):
+	app.config.snapper = state
+
+
+def _on_luks(_box, state, app):
+	app.config.luks = state
+	if state:
+		luks_passphrase(app)
+	else:
+		app.config.luks_pass = ""
+
+
 def filesystem(app):
+	config = app.config
 	items = []
 	for name, description in FILESYSTEM_CHOICES:
-		items.append(_action(("bold", f"  {name}"),
-		                     lambda _, v=name: _set(app, "filesystem", v)))
-		items.append(urwid.Text(("label", f"  {description}")))
-		items.append(urwid.Divider())
-	items.append(_back_button(app))
+		marker = ">" if config.filesystem == name else " "
+		items.append(_action(("bold", f"  {marker} {name}"),
+		                     lambda _, v=name: _choose_filesystem(app, v)))
+		items.append(urwid.Text(("label", f"      {description}")))
+	items.append(urwid.Divider())
+	if config.filesystem == "btrfs":
+		items.append(urwid.CheckBox("  Snapshots with snapper", state=config.snapper,
+		                            on_state_change=_on_snapper, user_data=app))
+	else:
+		items.append(urwid.Text(("unset", "  Snapshots with snapper  (needs btrfs)")))
+	items.append(urwid.Text(("label", "      Roll back system changes. Uses @ and @home subvolumes.")))
+	items.append(urwid.Divider())
+	items.append(urwid.CheckBox("  Encrypt with LUKS", state=config.luks,
+	                            on_state_change=_on_luks, user_data=app))
+	items.append(urwid.Text(("label", "      Encrypts the root partition. You enter a passphrase at boot.")))
+	items += [urwid.Divider(), _back_button(app)]
 	app.show_screen(_screen("Filesystem", items))
+
+
+def luks_passphrase(app):
+	passphrase = SubmitEdit("  Passphrase: ", mask="*")
+	confirm = SubmitEdit("  Confirm:    ", mask="*")
+	error_text = urwid.Text("")
+
+	def accept(_=None):
+		if len(passphrase.edit_text) < 8:
+			error_text.set_text(("error", "  Use at least 8 characters"))
+		elif passphrase.edit_text != confirm.edit_text:
+			error_text.set_text(("error", "  Passphrases don't match"))
+		else:
+			app.config.luks_pass = passphrase.edit_text
+			app.show_main()
+
+	def cancel(_=None):
+		app.config.luks = False
+		app.config.luks_pass = ""
+		app.show_main()
+
+	urwid.connect_signal(passphrase, "activate",
+	                     lambda _: listbox.set_focus(listbox.body.index(confirm)))
+	urwid.connect_signal(confirm, "activate", accept)
+	items = [
+		urwid.Text(("warning", "  Losing this passphrase means losing the data. There is no recovery.")),
+		urwid.Text(("label", "  You type it at every boot, using the keyboard layout you chose.")),
+	]
+	if app.config.manual and "home" in app.config.layout:
+		items.append(urwid.Text(("warning", "  Your separate home partition will not be encrypted.")))
+	items += [
+		urwid.Divider(),
+		passphrase,
+		confirm,
+		error_text,
+		urwid.Divider(),
+		_action(("bold", "  Accept"), accept),
+		_action(("unset", "  Cancel (turn off encryption)"), cancel),
+	]
+	listbox = _screen("Encryption", items)
+	app.show_screen(listbox)
 
 
 # ── Hostname ───────────────────────────────────────────────────────────
@@ -768,6 +840,8 @@ def summary(app):
 		("Root login", "yes" if config.root_pass else "disabled"),
 		("Swap partition", "yes" if config.has_swap_partition() else "no"),
 		("zram",           "yes" if config.zram else "no"),
+		("Encryption", "LUKS2" if config.luks else "no"),
+		("Snapshots",  "snapper" if config.snapper else "no"),
 		("Desktop",    config.desktop_label()),
 		("Components", ", ".join(config.components) or "main only"),
 		("Hardware",   ", ".join(config.hardware_packages) or "none"),

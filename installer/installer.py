@@ -39,6 +39,10 @@ LOG_PATH = "/var/log/debplus/install.log"
 STATE_PATH = "/run/debplus/state"
 ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
 
+LUKS_ROOT = "cryptroot"
+LUKS_SWAP = "cryptswap"
+SWAP_KEY_LIVE = "/run/debplus/swap.key"
+
 
 def _emit(text, stream=sys.stdout):
 	print(text, file=stream)
@@ -127,9 +131,9 @@ def _partition_auto(config: Config):
 def _format_layout(config: Config):
 	msg("Formatting...")
 	for role, part in config.layout.items():
-		if not part["format"]:
+		if not part["format"] or (role == "swap" and config.luks):
 			continue
-		device = part["device"]
+		device = _device(config, role)
 		if role == "esp":
 			_run(f"mkfs.fat -F32 {device}")
 		elif role == "swap":
@@ -140,7 +144,7 @@ def _format_layout(config: Config):
 
 def _mount_layout(config: Config):
 	layout = config.layout
-	root = layout["root"]["device"]
+	root = _device(config, "root")
 	btrfs = config.filesystem == "btrfs"
 	os.makedirs(MNT, exist_ok=True)
 	if btrfs:
@@ -162,12 +166,48 @@ def _mount_layout(config: Config):
 		_run(f"mount {layout['esp']['device']} {MNT}/boot/efi")
 
 
+def _device(config: Config, role):
+	"""Device to format or mount for a role. Encrypted roles use their open mapper."""
+	if config.luks and role == "root":
+		return f"/dev/mapper/{LUKS_ROOT}"
+	if config.luks and role == "swap":
+		return f"/dev/mapper/{LUKS_SWAP}"
+	return config.layout[role]["device"]
+
+
+def _cryptsetup(args, passphrase=None):
+	result = subprocess.run(["cryptsetup", *args], input=passphrase,
+	                        text=True, capture_output=True)
+	if result.returncode != 0:
+		die(f"cryptsetup {args[0]} failed: {result.stderr.strip()}")
+
+
+def _encrypt_layout(config: Config):
+	msg("Encrypting...")
+	root = config.layout["root"]["device"]
+	_cryptsetup(["luksFormat", "--type", "luks2", "--batch-mode", "--key-file=-", root],
+	            config.luks_pass)
+	_cryptsetup(["open", "--key-file=-", root, LUKS_ROOT], config.luks_pass)
+	if "swap" in config.layout:
+		swap = config.layout["swap"]["device"]
+		os.makedirs(os.path.dirname(SWAP_KEY_LIVE), exist_ok=True)
+		with open(SWAP_KEY_LIVE, "wb") as key_file:
+			key_file.write(os.urandom(64))
+		os.chmod(SWAP_KEY_LIVE, 0o600)
+		_cryptsetup(["luksFormat", "--type", "luks2", "--batch-mode",
+		             f"--key-file={SWAP_KEY_LIVE}", swap])
+		_cryptsetup(["open", f"--key-file={SWAP_KEY_LIVE}", swap, LUKS_SWAP])
+		_run(f"mkswap /dev/mapper/{LUKS_SWAP}")
+
+
 def partition_disk(config: Config):
 	if config.manual:
 		msg("Using selected partitions...")
 	else:
 		msg(f"Partitioning {config.disk}...")
 		_partition_auto(config)
+	if config.luks:
+		_encrypt_layout(config)
 	_format_layout(config)
 	_mount_layout(config)
 	ok("Partitioned and mounted")
@@ -175,7 +215,7 @@ def partition_disk(config: Config):
 
 def _fstab_rows(config: Config):
 	layout = config.layout
-	root = layout["root"]["device"]
+	root = _device(config, "root")
 	btrfs = config.filesystem == "btrfs"
 	rows = [(root, "/", config.filesystem,
 	         FSTAB_OPTIONS[config.filesystem] + (",subvol=@" if btrfs else ""), 1)]
@@ -188,14 +228,15 @@ def _fstab_rows(config: Config):
 	if "esp" in layout:
 		rows.append((layout["esp"]["device"], "/boot/efi", "vfat", "umask=0077", 2))
 	if "swap" in layout:
-		rows.append((layout["swap"]["device"], "none", "swap", "sw", 0))
+		rows.append((_device(config, "swap"), "none", "swap", "sw", 0))
 	return rows
 
 
 def write_fstab(config: Config):
 	lines = ["# <filesystem>  <mount>  <type>  <options>  <dump>  <pass>"]
 	for device, mount_point, filesystem, options, pass_number in _fstab_rows(config):
-		lines.append(f"UUID={_uuid(device)}  {mount_point}  {filesystem}  {options}  0  {pass_number}")
+		spec = device if device.startswith("/dev/mapper/") else f"UUID={_uuid(device)}"
+		lines.append(f"{spec}  {mount_point}  {filesystem}  {options}  0  {pass_number}")
 	with open(f"{MNT}/etc/fstab", "w") as fstab_file:
 		fstab_file.write("\n".join(lines) + "\n")
 
@@ -252,6 +293,15 @@ def write_apt_sources(config: Config):
 
 # ── Base system ────────────────────────────────────────────────────────
 
+def _extra_packages(config: Config):
+	packages = []
+	if config.luks:
+		packages += ["cryptsetup", "cryptsetup-initramfs", "console-setup"]
+	if config.snapper:
+		packages.append("snapper")
+	return packages
+
+
 def install_base(config: Config):
 	msg("Running debootstrap (this will take a while)...")
 	_run(f"debootstrap --arch=amd64 --variant=minbase {SUITE} {MNT} {MIRROR}")
@@ -267,7 +317,7 @@ def install_base(config: Config):
 		_run(f"chroot {MNT} dpkg --add-architecture i386")
 
 	msg("Installing base system...")
-	packages = read_lines(TARGET_PACKAGES_PATH) + BOOT_PACKAGES[config.boot_mode]
+	packages = read_lines(TARGET_PACKAGES_PATH) + BOOT_PACKAGES[config.boot_mode] + _extra_packages(config)
 	if config.zram:
 		packages.append("systemd-zram-generator")
 	if "non-free-firmware" in config.components:
@@ -295,6 +345,31 @@ def install_base(config: Config):
 def _uuid(device):
 	return subprocess.run(["blkid", "-s", "UUID", "-o", "value", device],
 	                      capture_output=True, text=True).stdout.strip()
+
+
+def configure_encryption(config: Config):
+	msg("Configuring encryption...")
+	lines = [f"{LUKS_ROOT} UUID={_uuid(config.layout['root']['device'])} none luks"]
+	if "swap" in config.layout:
+		os.makedirs(f"{MNT}/etc/luks", exist_ok=True)
+		shutil.copy2(SWAP_KEY_LIVE, f"{MNT}/etc/luks/swap.key")
+		os.chmod(f"{MNT}/etc/luks/swap.key", 0o600)
+		os.remove(SWAP_KEY_LIVE)
+		lines.append(f"{LUKS_SWAP} UUID={_uuid(config.layout['swap']['device'])} "
+		             f"/etc/luks/swap.key luks")
+	with open(f"{MNT}/etc/crypttab", "w") as crypttab_file:
+		crypttab_file.write("\n".join(lines) + "\n")
+	with open(f"{MNT}/etc/default/grub", "a") as grub_file:
+		grub_file.write("GRUB_ENABLE_CRYPTODISK=y\n")
+	_run(f"chroot {MNT} update-initramfs -u -k all")
+	ok("Encryption configured")
+
+
+def configure_snapper():
+	msg("Configuring snapper...")
+	_run(f"chroot {MNT} snapper -c root create-config /")
+	_run(f"chroot {MNT} snapper -c root create --description post-install")
+	ok("Snapper configured")
 
 
 def configure_system(config: Config):
@@ -330,6 +405,12 @@ def configure_system(config: Config):
 
 	_run(f"chroot {MNT} systemctl enable NetworkManager systemd-timesyncd")
 	copy_wifi_profiles()
+	
+	if config.luks:
+		configure_encryption(config)
+	if config.snapper:
+		configure_snapper()
+	
 	ok("System configured")
 
 

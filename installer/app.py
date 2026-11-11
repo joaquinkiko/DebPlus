@@ -180,6 +180,8 @@ class App:
 			("Hostname",   config.hostname),
 			("User",       config.username),
 			("Desktop",    config.desktop_label()),
+			("Encryption", "LUKS2" if config.luks else "none"),
+			("Snapshots",  "snapper" if config.snapper else "none"),
 			("Components",   ", ".join(["main"] + config.components)),
 			("Extras",     ", ".join(config.hardware_packages + config.software_packages)),
 			("Advanced",   ", ".join(config.advanced_labels())),

@@ -29,6 +29,9 @@ class Config:
 	backports_repo: bool = False
 	backports_kernel: bool = False
 	backports_mesa: bool = False
+	luks: bool = False
+	luks_pass: str = field(default="", repr=False)
+	snapper: bool = False  # btrfs only
 	manual: bool = False
 	layout: dict = field(default_factory=dict)  # role -> {"device", "format"}
 	zram: bool = True  # compressed swap in RAM, from systemd-zram-generator
@@ -53,7 +56,9 @@ class Config:
 
 	def missing_count(self) -> int:
 		missing = sum(1 for name in REQUIRED_FIELDS if not getattr(self, name))
-		return missing + (0 if self.layout_ready() else 1)
+		missing += 0 if self.layout_ready() else 1
+		missing += 1 if self.luks and not self.luks_pass else 0
+		return missing
 
 	def ready(self) -> bool:
 		return self.missing_count() == 0
