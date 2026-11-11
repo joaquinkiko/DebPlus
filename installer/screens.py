@@ -176,6 +176,68 @@ def _wifi_test(app):
 	_wifi_status(app, passed, message)
 
 
+# ── Pre-flight ─────────────────────────────────────────────────────────
+
+FIX_LABELS = {"network": "Fix network", "disk": "Choose another disk",
+              "clock": "Turn on time sync"}
+
+
+def _apply_fix(app, fix):
+	if fix == "network":
+		network(app)
+	elif fix == "disk":
+		disk(app)
+	elif fix == "clock":
+		utils.enable_ntp()
+		preflight(app)
+
+
+def _check_rows(app, checks, style):
+	rows = []
+	for check in checks:
+		rows.append(urwid.Text([(style, f"  {check.title}: "), ("label", check.message)]))
+		if check.fix:
+			rows.append(_action(("bold", f"    {FIX_LABELS[check.fix]}"),
+			                    lambda _, f=check.fix: _apply_fix(app, f)))
+		rows.append(urwid.Divider())
+	return rows
+
+
+def preflight(app, show_passed=False):
+	app.preflight = utils.preflight(app.config, app.online)
+	if not any(check.level != "ok" for check in app.preflight):
+		app.show_main()
+		return
+	blockers = [check for check in app.preflight if check.level == "block"]
+	warnings = [check for check in app.preflight if check.level == "warn"]
+	passed = [check for check in app.preflight if check.level == "ok"]
+
+	items = []
+	if blockers:
+		items.append(urwid.Text(("error", "  Can't continue")))
+		items += _check_rows(app, blockers, "error")
+	if warnings:
+		items.append(urwid.Text(("warning", "  Worth knowing")))
+		items += _check_rows(app, warnings, "warning")
+	if show_passed:
+		items.append(urwid.Text(("success", "  Passed")))
+		items += [urwid.Text([("success", f"  {check.title}: "), ("label", check.message)])
+		          for check in passed]
+	if blockers:
+		items.append(urwid.Text(("error", "  Issues above preventing install.")))
+	else:
+		items.append(urwid.Text(("success", "  Ready to continue.")))
+
+	items += [
+		urwid.Divider(),
+		_action(("bold", f"  {'Hide' if show_passed else 'Show'} passed checks ({len(passed)})"),
+		        lambda _: preflight(app, not show_passed)),
+		_action(("bold", "  Re-check"), lambda _: preflight(app, show_passed)),
+		_back_button(app),
+	]
+	app.show_screen(_screen("Pre-flight", items))
+
+
 # ── Keyboard ───────────────────────────────────────────────────────────
 
 def keyboard(app):

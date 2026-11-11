@@ -90,13 +90,19 @@ class App:
 		right = urwid.Text(f"{self.config.boot_mode.upper()}  ", align="right")
 		return urwid.AttrMap(urwid.Columns([left, right]), "header")
 
+	def preflight_issues(self):
+		return any(check.level != "ok" for check in self.preflight)
+
+	def preflight_passed(self):
+		return not any(check.level == "block" for check in self.preflight)
+
 	def _make_footer(self, text):
 		return urwid.AttrMap(urwid.Text(text), "footer")
 
 	def _steps(self):
 		"""(label, value, callback) per step. A truthy value marks it done."""
 		config = self.config
-		return [
+		steps = [
 			("Network",      "connected" if self.online else "",
 			                 lambda: screens.network(self)),
 			("Keyboard",     config.keymap,     lambda: screens.keyboard(self)),
@@ -116,6 +122,9 @@ class App:
 			("Advanced",     _chosen_label(config.advanced_labels()),
 			                 lambda: screens.advanced(self)),
 		]
+		if self.preflight_issues():
+			steps.insert(0, ("Pre-flight", "", lambda: screens.preflight(self)))
+		return steps
 
 	def _build_rail(self, steps, active=None):
 		items = [urwid.Divider()]
@@ -137,13 +146,14 @@ class App:
 
 		if self.config.fake_mode:
 			install = urwid.Text(("warning", "   Install (testing mode)"))
-		elif self.config.ready():
+		elif self.config.ready() and self.preflight_passed():
 			install = Selectable(("success", f" {GLYPH_ACTIVE} Install"))
 			urwid.connect_signal(install, "activate",
 			                     lambda _: screens.summary(self))
 		else:
-			install = urwid.Text(
-				("unset", f"   Install ({self.config.missing_count()} to go)"))
+			reason = (f"{self.config.missing_count()} to go"
+			          if self.config.missing_count() else "pre-flight")
+			install = urwid.Text(("unset", f"   Install ({reason})"))
 		items.append(install)
 
 		shell = Selectable(("bold", "   Shell"))
@@ -192,6 +202,8 @@ class App:
 
 	def show_main(self):
 		"""Rail focused, install plan in the right pane."""
+		self.preflight = utils.preflight(self.config, self.online)
+
 		if not self._in_main:
 			self._menu_focus += 1
 

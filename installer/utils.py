@@ -8,6 +8,7 @@ import subprocess
 import time
 import shutil
 from urllib.parse import urlparse
+from dataclasses import dataclass
 
 MNT = "/mnt/debplus"
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,6 +23,105 @@ FIRMWARE_PATH = os.path.join(ROOT_DIR, "packages", "firmware.list")
 CUSTOM_PATH = os.path.join(OPTIONS_DIR, "custom.list")
 CUSTOM_DIR = os.path.join(OPTIONS_DIR, "custom")
 REPO_SCHEMES = ("https", "http", "git")
+
+MIN_RAM_MIB = 1024
+WARN_RAM_MIB = 2048
+MIN_DISK_GIB = 10
+WARN_DISK_GIB = 20
+REQUIRED_TOOLS = ("debootstrap", "parted", "wipefs", "partprobe", "blkid",
+                  "lsblk", "chroot", "mkfs.fat", "mkfs.ext4", "mkfs.btrfs",
+                  "mkfs.xfs", "mokutil", "timedatectl")
+
+
+@dataclass
+class Check:
+	level: str  # "block", "warn", or "ok"
+	title: str
+	message: str
+	fix: str = None  # "network", "disk", "clock", or None
+
+
+def missing_tools():
+	"""Tools the installer image must ship. Empty when the image is complete."""
+	return [tool for tool in REQUIRED_TOOLS if not shutil.which(tool)]
+
+
+def _query(argv):
+	"""Stdout of a tool, or empty string if it is not installed."""
+	if not shutil.which(argv[0]):
+		return ""
+	return run(argv).stdout.strip()
+
+
+def _check_network(online):
+	if online:
+		return Check("ok", "Internet", "connected")
+	return Check("block", "Internet",
+	             "Debian is downloaded during install. Connect to Wi-Fi or Ethernet first.",
+	             "network")
+
+
+def _check_memory():
+	with open("/proc/meminfo") as meminfo_file:
+		kib = next(int(line.split()[1]) for line in meminfo_file
+		           if line.startswith("MemTotal:"))
+	gib = kib / 2**20
+	if kib < MIN_RAM_MIB * 1024:
+		return Check("block", "Memory",
+		             f"This computer has {gib:.1f} GB. Debian needs at least "
+		             f"{MIN_RAM_MIB // 1024} GB to install.")
+	if kib < WARN_RAM_MIB * 1024:
+		return Check("warn", "Memory",
+		             f"This computer has {gib:.1f} GB. Install works, but the desktop "
+		             f"may feel slow. {WARN_RAM_MIB // 1024} GB or more is recommended.")
+	return Check("ok", "Memory", f"{gib:.1f} GB")
+
+
+def _check_disk(device):
+	gib = int(_query(["lsblk", "-bdno", "SIZE", device]) or 0) / 2**30
+	if gib < MIN_DISK_GIB:
+		return Check("block", "Disk",
+		             f"The chosen disk is {gib:.0f} GB. Debian needs at least "
+		             f"{MIN_DISK_GIB} GB.", "disk")
+	if gib < WARN_DISK_GIB:
+		return Check("warn", "Disk",
+		             f"The chosen disk is {gib:.0f} GB. Install works, but space will "
+		             f"be tight. {WARN_DISK_GIB} GB or more is recommended.", "disk")
+	return Check("ok", "Disk", f"{gib:.0f} GB")
+
+
+def _check_secure_boot():
+	if detect_boot_mode() != "uefi":
+		return Check("ok", "Secure Boot", "not applicable")
+	state = _query(["mokutil", "--sb-state"]).lower()
+	if "enabled" in state:
+		return Check("warn", "Secure Boot",
+		             "Secure Boot is on. Debian installed by this tool won't boot "
+		             "with it on yet. Turn it off in your firmware settings.")
+	if "disabled" in state:
+		return Check("ok", "Secure Boot", "off")
+	return None  # unknown state is an image problem, not a user problem
+
+
+def _check_clock():
+	if _query(["timedatectl", "show", "-p", "NTPSynchronized", "--value"]) == "yes":
+		return Check("ok", "Clock", "set automatically")
+	return Check("warn", "Clock",
+	             "The clock is not synced over the internet. A wrong time can "
+	             "cause package download errors.", "clock")
+
+
+def enable_ntp():
+	run(["timedatectl", "set-ntp", "true"])
+
+
+def preflight(config, online):
+	"""List of Check objects. Only level "block" stops Install."""
+	checks = [_check_network(online), _check_memory(),
+	          _check_secure_boot(), _check_clock()]
+	if config.disk:
+		checks.append(_check_disk(config.disk))
+	return [check for check in checks if check]
 
 
 def check_repo(url):
