@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-only. See COPYING and NOTICE.
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -33,17 +34,32 @@ MESA_PACKAGES = ["libgl1-mesa-dri", "libglx-mesa0", "libegl-mesa0", "libgbm1",
                  "mesa-vulkan-drivers", "mesa-va-drivers"]
 
 
+LOG_PATH = "/var/log/debplus/install.log"
+STATE_PATH = "/run/debplus/state"
+ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
+
+
+def _emit(text, stream=sys.stdout):
+	print(text, file=stream)
+	os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+	with open(LOG_PATH, "a") as log_file:
+		log_file.write(ANSI_PATTERN.sub("", text) + "\n")
+
+
 def msg(text):
-	print(f"\n  {CYAN}{BOLD}::{NC} {BOLD}{text}{NC}")
+	_emit(f"\n  {CYAN}{BOLD}::{NC} {BOLD}{text}{NC}")
 
 
 def ok(text):
-	print(f"  {GREEN}{text}{NC}")
+	_emit(f"  {GREEN}{text}{NC}")
+
+
+class StageError(Exception):
+	"""Raised inside an install stage. The runner decides retry, shell, reboot, or abort."""
 
 
 def die(text):
-	print(f"\n  {RED}{BOLD}Error:{NC} {text}\n", file=sys.stderr)
-	sys.exit(1)
+	raise StageError(text)
 
 
 def _run(command, quiet=False):
@@ -395,62 +411,109 @@ def install_bootloader(config: Config):
 
 def cleanup():
 	msg("Unmounting...")
+	if os.path.isdir(f"{MNT}/var/log"):
+		_try(f"cp {LOG_PATH} {MNT}/var/log/debplus-install.log")
 	_try(f"umount -Rl {MNT}")
 	ok("Done")
 
 
-def _failure_prompt():
-	"""Offer reboot or a chrooted shell after a failed install."""
+def _open_shell():
+	if os.path.isdir(f"{MNT}/etc"):
+		subprocess.run(["chroot", MNT, "/bin/bash"])
+	else:
+		subprocess.run(["/bin/bash"])
+
+
+def _choose(question, keys):
+	"""Prompt until the reply's first letter is in keys. Returns the last key on EOF."""
 	while True:
 		try:
-			choice = input(f"\n  {BOLD}(R)eboot or (S)hell?{NC} ").strip().lower()
+			reply = input(f"\n  {BOLD}{question}{NC} ").strip().lower()[:1]
 		except (EOFError, KeyboardInterrupt):
-			print(f"\n  Target remains mounted at {MNT}.")
+			return keys[-1]
+		if reply in keys:
+			return reply
+		print("  Enter one of the letters shown.")
+
+
+def _mark_done(label):
+	os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
+	with open(STATE_PATH, "a") as state_file:
+		state_file.write(label + "\n")
+
+
+def _run_stage(index, total, label, action):
+	msg(f"[{index}/{total}] {label}")
+	while True:
+		try:
+			action()
+			_mark_done(label)
 			return
-		if choice in ("r", "reboot"):
+		except Exception as error:
+			_emit(f"\n  {RED}{BOLD}Error:{NC} {label} failed: {error}", sys.stderr)
+			while True:
+				choice = _choose("(R)etry, (S)hell, Re(b)oot, or (A)bort?", "rsba")
+				if choice != "s":
+					break
+				_open_shell()
+			if choice == "r":
+				continue
 			cleanup()
-			subprocess.run("reboot", shell=True)
-			return
-		if choice in ("s", "shell"):
-			print(f"\n  Chrooted into {MNT}. Type 'exit' to return.\n")
-			subprocess.run(["chroot", MNT, "/bin/bash"])
-		else:
-			print("  Enter R or S.")
+			if choice == "b":
+				subprocess.run("reboot", shell=True)
+			sys.exit(1)
 
 
 def run_install(config: Config):
-	print(f"\n  {BOLD}{CYAN}Installing {PROFILE['PROFILE_NAME']}{NC}\n")
+	_emit(f"\n  {BOLD}{CYAN}Installing {PROFILE['PROFILE_NAME']}{NC}\n")
 	_try(f"hostname {config.hostname}")
-
 	failures = []
-	try:
-		partition_disk(config)
-		install_base(config)
-		configure_system(config)
-		create_users(config)
+
+	def desktop_stage():
 		if not install_window_manager(config):
 			failures.append("Window manager")
-		failures += install_extras(config)
-		failures += install_custom_software(config)
-		install_bootloader(config)
-	except BaseException:
+
+	def extras_stage():
+		failures.extend(install_extras(config))
+		failures.extend(install_custom_software(config))
+
+	stages = [
+		("Partitioning", lambda: partition_disk(config)),
+		("Base system", lambda: install_base(config)),
+		("Configuration", lambda: configure_system(config)),
+		("Users", lambda: create_users(config)),
+		("Desktop", desktop_stage),
+		("Extras", extras_stage),
+		("Bootloader", lambda: install_bootloader(config)),
+	]
+	try:
+		for index, (label, action) in enumerate(stages, 1):
+			_run_stage(index, len(stages), label, action)
+	except KeyboardInterrupt:
 		cleanup()
 		raise
 
 	if failures:
-		print(f"\n  {RED}{BOLD}Installed with errors:{NC}")
+		_emit(f"\n  {RED}{BOLD}Installed with errors:{NC}")
 		for failure in failures:
-			print(f"  {RED}- {failure}{NC}")
-		_failure_prompt()
+			_emit(f"  {RED}- {failure}{NC}")
+		while True:
+			choice = _choose("(R)eboot, (S)hell, or (A)bort?", "rsa")
+			if choice != "s":
+				break
+			_open_shell()
+		cleanup()
+		if choice == "r":
+			subprocess.run("reboot", shell=True)
 		return
 
-	print(f"\n  {GREEN}{BOLD}Installation complete!{NC}")
-	print("\n  Rebooting in 30 seconds. Remove the installation media if the")
-	print("  firmware boots it first. Press Ctrl+C to stay in the live system.")
+	_emit(f"\n  {GREEN}{BOLD}Installation complete!{NC}")
+	_emit("\n  Rebooting in 30 seconds. Remove the installation media if the")
+	_emit("  firmware boots it first. Press Ctrl+C to stay in the live system.")
 	try:
 		time.sleep(30)
 	except KeyboardInterrupt:
-		print("\n  Reboot cancelled. Target is still mounted at " + MNT + ".")
+		_emit("\n  Reboot cancelled. Target is still mounted at " + MNT + ".")
 		return
 	cleanup()
 	subprocess.run("reboot", shell=True)
