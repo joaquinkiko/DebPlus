@@ -105,9 +105,8 @@ def _check_secure_boot():
 		return Check("ok", "Secure Boot", "not applicable")
 	state = _query(["mokutil", "--sb-state"]).lower()
 	if "enabled" in state:
-		return Check("warn", "Secure Boot",
-		             "Secure Boot is on. Debian installed by this tool won't boot "
-		             "with it on yet. Turn it off in your firmware settings.")
+		return Check("ok", "Secure Boot",
+		             "on. Debian supports it. Some drivers, such as NVIDIA, need a one-time key enrollment after install.")
 	if "disabled" in state:
 		return Check("ok", "Secure Boot", "off")
 	return None  # unknown state is an image problem, not a user problem

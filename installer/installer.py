@@ -24,7 +24,8 @@ NC = "\033[0m"
 SUITE = PROFILE["SUITE"]
 MIRROR = PROFILE["MIRROR"]
 PARTED_FS_HINT = {"btrfs": "btrfs", "ext4": "ext4", "xfs": "ext2"}
-BOOT_PACKAGES = {"uefi": ["grub-efi-amd64", "efibootmgr"], "bios": ["grub-pc"]}
+BOOT_PACKAGES = {"uefi": ["shim-signed", "grub-efi-amd64-signed", "efibootmgr"],
+                 "bios": ["grub-pc"]}
 FSTAB_OPTIONS = {
 	"btrfs": "defaults,compress=zstd,noatime",
 	"ext4": "errors=remount-ro",
@@ -453,19 +454,26 @@ def install_custom_software(config: Config) -> list:
 
 # ── Bootloader ─────────────────────────────────────────────────────────
 
+def _install_removable_fallback():
+	"""Copy shim and GRUB to EFI/BOOT so the disk boots if firmware drops its NVRAM entry."""
+	source = f"{MNT}/boot/efi/EFI/debian"
+	target = f"{MNT}/boot/efi/EFI/BOOT"
+	os.makedirs(target, exist_ok=True)
+	shutil.copy2(f"{source}/shimx64.efi", f"{target}/BOOTX64.EFI")
+	for name in ("grubx64.efi", "mmx64.efi"):
+		shutil.copy2(f"{source}/{name}", f"{target}/{name}")
+
+
 def install_bootloader(config: Config):
-	msg(f"Installing GRUB ({config.boot_mode})...")
+	msg(f"Installing bootloader ({config.boot_mode})...")
 	if config.boot_mode == "uefi":
-		# --removable also writes EFI/BOOT/BOOTX64.EFI so the disk boots
-		# when firmware drops its NVRAM entry.
-		_run(f"chroot {MNT} grub-install --target=x86_64-efi "
-		     f"--efi-directory=/boot/efi "
-		     f"--bootloader-id={PROFILE['PROFILE_SLUG']} "
-		     f"--removable --recheck")
+		if not os.path.isfile(f"{MNT}/boot/efi/EFI/debian/shimx64.efi"):
+			die("Signed shim was not installed to the EFI partition.")
+		_install_removable_fallback()
 	else:
 		_run(f"chroot {MNT} grub-install --target=i386-pc --recheck {config.disk}")
 	_run(f"chroot {MNT} update-grub")
-	ok("GRUB installed")
+	ok("Bootloader installed")
 
 
 # ── Cleanup and orchestration ─────────────────────────────────────────
