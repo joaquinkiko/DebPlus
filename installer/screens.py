@@ -26,7 +26,6 @@ def _on_swappiness(_edit, new_text, app):
 	if new_text.isdigit() and int(new_text) <= 100:
 		app.config.swappiness = int(new_text)
 
-
 def _on_multiarch(_box, state, app):
 	app.config.multiarch_i386 = state
 	_drop_unavailable(app.config)
@@ -338,8 +337,8 @@ def locale(app):
 
 def disk(app):
 	items = [
-		_action(f"  {device:<14}{size:<10}{model}",
-		        lambda _, v=device: _set(app, "disk", v))
+			_action(f"  {device:<14}{size:<10}{model}",
+		        lambda _, v=device: _choose_disk(app, v))
 		for device, size, model in utils.get_disks()
 	]
 	if not items:
@@ -349,6 +348,106 @@ def disk(app):
 		_screen("Disk Selection", items),
 		footer_text="  ↑↓ navigate  Enter select  WARNING: selected disk will be erased",
 	)
+
+
+# ── Partitioning ───────────────────────────────────────────────────────
+
+FORMAT_DEFAULT = {"root": True, "home": True, "swap": True,
+                  "esp": False, "bios_grub": False}
+
+
+def _choose_disk(app, device):
+	app.config.disk = device
+	app.config.layout = {}
+	app.config.manual = False
+	partition_mode(app)
+
+
+def _manual_roles(boot_mode):
+	roles = [("root", "Root (/)"), ("home", "Home (/home), optional"),
+	         ("swap", "Swap, optional")]
+	if boot_mode == "uefi":
+		roles.insert(1, ("esp", "EFI system partition"))
+	else:
+		roles.insert(0, ("bios_grub", "BIOS boot partition (needed on GPT disks)"))
+	return roles
+
+
+def _set_automatic(app, swap_partition):
+	app.config.manual = False
+	app.config.swap_partition = swap_partition
+	app.show_main()
+
+
+def partition_mode(app):
+	items = [
+		_action(("bold", "  Automatic"), lambda _: _set_automatic(app, True)),
+		urwid.Text(("label", "      Erase the whole disk. Creates swap equal to RAM if available disk space.")),
+		urwid.Divider(),
+		_action(("bold", "  Automatic without swap"), lambda _: _set_automatic(app, False)),
+		urwid.Text(("label", "      Erase the whole disk. No swap partition is created.")),
+		urwid.Divider(),
+		_action(("bold", "  Manual"), lambda _: partition_layout(app)),
+		urwid.Text(("label", "      Use existing partitions. Only the ones you pick are formatted.")),
+		urwid.Divider(),
+		_back_button(app),
+	]
+	app.show_screen(_screen("Partitioning", items))
+
+
+def _assign(app, role, device):
+	layout = app.config.layout
+	for other_role in [name for name, part in layout.items() if part["device"] == device]:
+		del layout[other_role]
+	if device is None:
+		layout.pop(role, None)
+	else:
+		layout[role] = {"device": device, "format": FORMAT_DEFAULT[role]}
+	partition_layout(app)
+
+
+def _on_format(_box, state, user_data):
+	app, role = user_data
+	app.config.layout[role]["format"] = state
+
+
+def _finish_manual(app):
+	config = app.config
+	if not config.layout_ready():
+		partition_layout(app, "Choose a root partition, and an EFI partition on UEFI.")
+		return
+	if (config.boot_mode == "bios" and "bios_grub" not in config.layout
+	        and utils.partition_table_type(config.disk) == "gpt"):
+		partition_layout(app, "This disk uses GPT, so it needs a BIOS boot partition.")
+		return
+	app.show_main()
+
+
+def partition_layout(app, error=""):
+	config = app.config
+	config.manual = True
+	partitions = utils.partition_rows(config.disk)
+	items = []
+	for role, label in _manual_roles(config.boot_mode):
+		selected = config.layout.get(role)
+		items.append(urwid.Text(("bold", f"  {label}")))
+		for device, size, filesystem in partitions:
+			marker = "*" if selected and selected["device"] == device else " "
+			items.append(_action(f"  {marker} {device:<16}{size:<9}{filesystem}",
+			                     lambda _, r=role, d=device: _assign(app, r, d)))
+		items.append(_action("    None", lambda _, r=role: _assign(app, r, None)))
+		if role != "root" and selected:
+			items.append(urwid.CheckBox(
+				"    Format (erases this partition)", state=selected["format"],
+				on_state_change=_on_format, user_data=(app, role)))
+		items.append(urwid.Divider())
+	items += [
+		urwid.Text(("error", f"  {error}" if error else "")),
+		_action(("bold", "  Done"), lambda _: _finish_manual(app)),
+		_back_button(app),
+	]
+	app.show_screen(_screen("Manual Partitioning", items),
+	                footer_text="  ↑↓ navigate  Space toggle  Enter select  Esc back")
 
 
 # ── Filesystem ─────────────────────────────────────────────────────────
@@ -608,6 +707,10 @@ def _on_backports_repo(_box, state, app):
 def advanced(app):
 	config = app.config
 	items = [
+		urwid.CheckBox("  zram (compressed swap in RAM)", state=config.zram,
+		               on_state_change=_on_flag, user_data=(app, "zram")),
+		urwid.Text(("label", "      Recommended. Used before any swap partition. Doesn't support hibernation.")),
+		urwid.Divider(),
 		urwid.CheckBox("  32-bit (i386) support", state=config.multiarch_i386,
 		               on_state_change=_on_multiarch,
 		               user_data=app),
@@ -663,6 +766,8 @@ def summary(app):
 		("Hostname",   config.hostname),
 		("User",       config.username),
 		("Root login", "yes" if config.root_pass else "disabled"),
+		("Swap partition", "yes" if config.has_swap_partition() else "no"),
+		("zram",           "yes" if config.zram else "no"),
 		("Desktop",    config.desktop_label()),
 		("Components", ", ".join(config.components) or "main only"),
 		("Hardware",   ", ".join(config.hardware_packages) or "none"),
@@ -673,8 +778,7 @@ def summary(app):
 	         for label, value in rows]
 	items += [
 		urwid.Divider(),
-		urwid.Text(("warning",
-		            f"  WARNING: ALL data on {config.disk} will be destroyed!")),
+		urwid.Text(("warning", f"  WARNING: {config.erase_text()}!")),
 		urwid.Divider(),
 		_action(("error", "  Begin installation"), lambda _: _begin_install(app)),
 		urwid.Divider(),

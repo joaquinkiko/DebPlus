@@ -191,7 +191,7 @@ class App:
 		if config.disk:
 			rows.append(urwid.Divider())
 			rows.append(urwid.Text(
-				("warning", f" ! All data on {config.disk} will be erased")))
+				("warning", f" ! {config.erase_text()}")))
 
 		box = urwid.LineBox(
 			urwid.Filler(urwid.Pile(rows), valign="top"),

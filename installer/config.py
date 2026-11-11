@@ -29,10 +29,31 @@ class Config:
 	backports_repo: bool = False
 	backports_kernel: bool = False
 	backports_mesa: bool = False
+	manual: bool = False
+	layout: dict = field(default_factory=dict)  # role -> {"device", "format"}
+	zram: bool = True  # compressed swap in RAM, from systemd-zram-generator
+	swap_partition: bool = True  # automatic mode only; manual uses the layout
 	swappiness: int = 60
+	
+	def has_swap_partition(self) -> bool:
+		if self.manual:
+			return "swap" in self.layout
+		return self.swap_partition
+
+	def layout_ready(self) -> bool:
+		if not self.manual:
+			return True
+		needed = {"root"} | ({"esp"} if self.boot_mode == "uefi" else set())
+		return needed <= set(self.layout)
+
+	def erase_text(self) -> str:
+		if self.manual:
+			return "Only the selected partitions will be formatted"
+		return f"All data on {self.disk} will be erased"
 
 	def missing_count(self) -> int:
-		return sum(1 for name in REQUIRED_FIELDS if not getattr(self, name))
+		missing = sum(1 for name in REQUIRED_FIELDS if not getattr(self, name))
+		return missing + (0 if self.layout_ready() else 1)
 
 	def ready(self) -> bool:
 		return self.missing_count() == 0
@@ -49,6 +70,8 @@ class Config:
 			labels.append("backports mesa")
 		if self.swappiness != 60:
 			labels.append(f"swappiness {self.swappiness}")
+		if not self.zram:
+			labels.append("no zram")
 		return labels
 
 	def desktop_label(self) -> str:

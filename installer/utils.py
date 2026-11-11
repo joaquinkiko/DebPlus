@@ -31,6 +31,16 @@ WARN_DISK_GIB = 20
 REQUIRED_TOOLS = ("debootstrap", "parted", "wipefs", "partprobe", "blkid",
                   "lsblk", "chroot", "mkfs.fat", "mkfs.ext4", "mkfs.btrfs",
                   "mkfs.xfs", "mokutil", "timedatectl")
+ESP_RESERVE_GIB = 1
+                  
+def disk_bytes(device):
+	return int(_query(["lsblk", "-bdno", "SIZE", device]) or 0)
+
+
+	def swap_gib(self, ram_gib: int, disk_gib: int) -> int:
+		"""Swap equal to RAM, limited so root keeps its minimum. 0 means no room."""
+		reserve = MIN_DISK_GIB + (ESP_RESERVE_GIB if self.boot_mode == "uefi" else 0)
+		return max(0, min(ram_gib, disk_gib - reserve))
 
 
 @dataclass
@@ -360,3 +370,24 @@ def package_requirements():
 	requirements.update({custom_id: requires
 	                     for custom_id, _menu, _section, _label, _script, requires in custom_rows()})
 	return requirements
+
+
+def partition_rows(disk):
+	"""(device, size, filesystem) per partition on disk."""
+	rows = []
+	for line in run(["lsblk", "-lnpo", "NAME,TYPE,SIZE,FSTYPE", disk]).stdout.splitlines():
+		fields = line.split() + ["", ""]
+		if fields[1] == "part":
+			rows.append((fields[0], fields[2], fields[3] or "unformatted"))
+	return rows
+
+
+def partition_table_type(disk):
+	"""'gpt', 'dos', or empty if unknown."""
+	return run(["blkid", "-s", "PTTYPE", "-o", "value", disk]).stdout.strip()
+
+def ram_mib():
+	with open("/proc/meminfo") as meminfo_file:
+		kib = next(int(line.split()[1]) for line in meminfo_file
+		           if line.startswith("MemTotal:"))
+	return kib // 1024

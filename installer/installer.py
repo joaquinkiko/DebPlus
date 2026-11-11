@@ -95,34 +95,108 @@ def _wait_for_partitions(disk, expected, attempts=10):
 	die(f"Expected {expected} partitions on {disk}, found {len(parts)}")
 
 
-def partition_disk(config: Config):
-	msg(f"Partitioning {config.disk}...")
+def _partition_auto(config: Config):
 	uefi = config.boot_mode == "uefi"
-	fs_hint = PARTED_FS_HINT[config.filesystem]
-	expected = 2 if uefi else 1
-
-	_run(f"wipefs -af {config.disk}", quiet=True)
+	filesystem_hint = PARTED_FS_HINT[config.filesystem]
+	ram_gib = -(-utils.ram_mib() // 1024)
+	disk_gib = utils.disk_bytes(config.disk) // 2**30
+	swap_gib = config.swap_gib(ram_gib, disk_gib) if config.has_swap_partition() else 0
+	swap = swap_gib > 0
+	steps = ["mklabel gpt"]
 	if uefi:
-		layout = (f"mklabel gpt mkpart ESP fat32 1MiB 513MiB set 1 esp on "
-		          f"mkpart root {fs_hint} 513MiB 100%")
+		roles = ["esp", "root"]
+		steps.append("mkpart ESP fat32 1MiB 513MiB set 1 esp on")
+		root_start = "513MiB"
 	else:
-		layout = f"mklabel msdos mkpart primary {fs_hint} 1MiB 100% set 1 boot on"
-	_run(f"parted -s {config.disk} {layout}", quiet=True)
+		roles = ["bios_grub", "root"]
+		steps.append("mkpart bios_grub 1MiB 2MiB set 1 bios_grub on")
+		root_start = "2MiB"
+	root_end = f"-{swap_gib}GiB" if swap else "100%"
+	steps.append(f"mkpart root {filesystem_hint} {root_start} {root_end}")
+	if swap:
+		roles.append("swap")
+		steps.append(f"mkpart swap linux-swap -{swap_gib}GiB 100%")
+	_run(f"wipefs -af {config.disk}", quiet=True)
+	_run(f"parted -s {config.disk} {' '.join(steps)}", quiet=True)
+	partitions = _wait_for_partitions(config.disk, len(roles))
+	config.layout = {role: {"device": device, "format": role != "bios_grub"}
+	                 for role, device in zip(roles, partitions)}
 
-	parts = _wait_for_partitions(config.disk, expected)
-	esp_part, root_part = (parts[0], parts[1]) if uefi else (None, parts[0])
 
+def _format_layout(config: Config):
 	msg("Formatting...")
-	if uefi:
-		_run(f"mkfs.fat -F32 {esp_part}")
-	_make_filesystem(root_part, config.filesystem)
+	for role, part in config.layout.items():
+		if not part["format"]:
+			continue
+		device = part["device"]
+		if role == "esp":
+			_run(f"mkfs.fat -F32 {device}")
+		elif role == "swap":
+			_run(f"mkswap {device}")
+		elif role in ("root", "home"):
+			_make_filesystem(device, config.filesystem)
 
+
+def _mount_layout(config: Config):
+	layout = config.layout
+	root = layout["root"]["device"]
+	btrfs = config.filesystem == "btrfs"
 	os.makedirs(MNT, exist_ok=True)
-	_run(f"mount {root_part} {MNT}")
-	if uefi:
+	if btrfs:
+		_run(f"mount {root} {MNT}")
+		_run(f"btrfs subvolume create {MNT}/@")
+		if "home" not in layout:
+			_run(f"btrfs subvolume create {MNT}/@home")
+		_run(f"umount {MNT}")
+	subvolume_option = "-o subvol=@ " if btrfs else ""
+	_run(f"mount {subvolume_option}{root} {MNT}")
+	if "home" in layout:
+		os.makedirs(f"{MNT}/home", exist_ok=True)
+		_run(f"mount {layout['home']['device']} {MNT}/home")
+	elif btrfs:
+		os.makedirs(f"{MNT}/home", exist_ok=True)
+		_run(f"mount -o subvol=@home {root} {MNT}/home")
+	if "esp" in layout:
 		os.makedirs(f"{MNT}/boot/efi", exist_ok=True)
-		_run(f"mount {esp_part} {MNT}/boot/efi")
+		_run(f"mount {layout['esp']['device']} {MNT}/boot/efi")
+
+
+def partition_disk(config: Config):
+	if config.manual:
+		msg("Using selected partitions...")
+	else:
+		msg(f"Partitioning {config.disk}...")
+		_partition_auto(config)
+	_format_layout(config)
+	_mount_layout(config)
 	ok("Partitioned and mounted")
+
+
+def _fstab_rows(config: Config):
+	layout = config.layout
+	root = layout["root"]["device"]
+	btrfs = config.filesystem == "btrfs"
+	rows = [(root, "/", config.filesystem,
+	         FSTAB_OPTIONS[config.filesystem] + (",subvol=@" if btrfs else ""), 1)]
+	if "home" in layout:
+		rows.append((layout["home"]["device"], "/home", config.filesystem,
+		             FSTAB_OPTIONS[config.filesystem], 2))
+	elif btrfs:
+		rows.append((root, "/home", "btrfs",
+		             FSTAB_OPTIONS["btrfs"] + ",subvol=@home", 2))
+	if "esp" in layout:
+		rows.append((layout["esp"]["device"], "/boot/efi", "vfat", "umask=0077", 2))
+	if "swap" in layout:
+		rows.append((layout["swap"]["device"], "none", "swap", "sw", 0))
+	return rows
+
+
+def write_fstab(config: Config):
+	lines = ["# <filesystem>  <mount>  <type>  <options>  <dump>  <pass>"]
+	for device, mount_point, filesystem, options, pass_number in _fstab_rows(config):
+		lines.append(f"UUID={_uuid(device)}  {mount_point}  {filesystem}  {options}  0  {pass_number}")
+	with open(f"{MNT}/etc/fstab", "w") as fstab_file:
+		fstab_file.write("\n".join(lines) + "\n")
 
 
 # ── Chroot mounts ──────────────────────────────────────────────────────
@@ -193,6 +267,8 @@ def install_base(config: Config):
 
 	msg("Installing base system...")
 	packages = read_lines(TARGET_PACKAGES_PATH) + BOOT_PACKAGES[config.boot_mode]
+	if config.zram:
+		packages.append("systemd-zram-generator")
 	if "non-free-firmware" in config.components:
 		packages += read_lines(FIRMWARE_PATH)
 	_run(f"chroot {MNT} env DEBIAN_FRONTEND=noninteractive apt-get update")
@@ -218,21 +294,6 @@ def install_base(config: Config):
 def _uuid(device):
 	return subprocess.run(["blkid", "-s", "UUID", "-o", "value", device],
 	                      capture_output=True, text=True).stdout.strip()
-
-
-def write_fstab(config: Config):
-	parts = get_partitions(config.disk)
-	uefi = config.boot_mode == "uefi"
-	esp_part, root_part = (parts[0], parts[1]) if uefi else (None, parts[0])
-
-	lines = ["# <filesystem>  <mount>  <type>  <options>  <dump>  <pass>",
-	         f"UUID={_uuid(root_part)}  /  {config.filesystem}  "
-	         f"{FSTAB_OPTIONS[config.filesystem]}  0  1"]
-	if uefi:
-		lines.append(f"UUID={_uuid(esp_part)}  /boot/efi  vfat  umask=0077  0  2")
-
-	with open(f"{MNT}/etc/fstab", "w") as fstab_file:
-		fstab_file.write("\n".join(lines) + "\n")
 
 
 def configure_system(config: Config):
