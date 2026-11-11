@@ -32,6 +32,7 @@ class Config:
 	luks: bool = False
 	luks_pass: str = field(default="", repr=False)
 	snapper: bool = False  # btrfs only
+	auto_updates: bool = True  # daily security upgrades via unattended-upgrades
 	manual: bool = False
 	layout: dict = field(default_factory=dict)  # role -> {"device", "format"}
 	zram: bool = True  # compressed swap in RAM, from systemd-zram-generator

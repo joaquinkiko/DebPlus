@@ -299,6 +299,8 @@ def _extra_packages(config: Config):
 		packages += ["cryptsetup", "cryptsetup-initramfs", "console-setup"]
 	if config.snapper:
 		packages.append("snapper")
+	if config.auto_updates:
+		packages.append("unattended-upgrades")
 	return packages
 
 
@@ -372,6 +374,14 @@ def configure_snapper():
 	ok("Snapper configured")
 
 
+def configure_auto_updates():
+	msg("Enabling security updates...")
+	with open(f"{MNT}/etc/apt/apt.conf.d/20auto-upgrades", "w") as periodic_file:
+		periodic_file.write('APT::Periodic::Update-Package-Lists "1";\n'
+		                    'APT::Periodic::Unattended-Upgrade "1";\n')
+	ok("Security updates enabled")
+
+
 def configure_system(config: Config):
 	msg("Configuring system...")
 	write_fstab(config)
@@ -410,6 +420,9 @@ def configure_system(config: Config):
 		configure_encryption(config)
 	if config.snapper:
 		configure_snapper()
+	
+	if config.auto_updates:
+		configure_auto_updates()
 	
 	ok("System configured")
 
