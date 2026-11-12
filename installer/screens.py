@@ -267,6 +267,12 @@ def keyboard(app):
 
 # ── Timezone ───────────────────────────────────────────────────────────
 
+def _pick_timezone(app, zone):
+	if not app.config.locale:
+		app.config.locale = utils.locale_for_timezone(zone) or ""
+	_set(app, "timezone", zone)
+
+
 def timezone(app):
 	app.online = utils.is_online()
 	all_zones = utils.get_timezones()
@@ -277,12 +283,12 @@ def timezone(app):
 	def refresh(text):
 		pattern = text.strip().lower()
 		matches = [zone for zone in all_zones if pattern in zone.lower()]
-		_search_results(results, matches, lambda zone: _set(app, "timezone", zone))
+		_search_results(results, matches, lambda zone: _pick_timezone(app, zone))
 
 	def autodetect(_):
 		zone, reason = utils.detect_timezone()
 		if zone:
-			_set(app, "timezone", zone)
+			_pick_timezone(app, zone)
 		else:
 			status.set_text(("error", f"  Autodetect failed: {reason}"))
 

@@ -42,6 +42,39 @@ TIMEZONE_LOOKUPS = (
 	("http://ip-api.com/json/?fields=timezone", ("timezone",)),
 )
 
+COUNTRY_LOCALES = {
+	"US": "en_US.UTF-8", "GB": "en_GB.UTF-8", "IE": "en_IE.UTF-8",
+	"DE": "de_DE.UTF-8", "AT": "de_AT.UTF-8", "CH": "de_CH.UTF-8",
+	"FR": "fr_FR.UTF-8", "BE": "fr_BE.UTF-8", "ES": "es_ES.UTF-8",
+	"MX": "es_MX.UTF-8", "AR": "es_AR.UTF-8", "IT": "it_IT.UTF-8",
+	"PT": "pt_PT.UTF-8", "BR": "pt_BR.UTF-8", "NL": "nl_NL.UTF-8",
+	"SE": "sv_SE.UTF-8", "NO": "nb_NO.UTF-8", "DK": "da_DK.UTF-8",
+	"FI": "fi_FI.UTF-8", "PL": "pl_PL.UTF-8", "RU": "ru_RU.UTF-8",
+	"JP": "ja_JP.UTF-8", "CN": "zh_CN.UTF-8", "KR": "ko_KR.UTF-8",
+	"CZ": "cs_CZ.UTF-8", "HU": "hu_HU.UTF-8", "GR": "el_GR.UTF-8",
+	"TR": "tr_TR.UTF-8", "UA": "uk_UA.UTF-8", "CA": "en_CA.UTF-8",
+	"AU": "en_AU.UTF-8", "NZ": "en_NZ.UTF-8",
+}
+
+
+def locale_for_timezone(zone):
+	"""Installed UTF-8 locale for the zone's country, or None."""
+	country_code = ""
+	try:
+		with open("/usr/share/zoneinfo/zone.tab") as zone_file:
+			for line in zone_file:
+				fields = line.split()
+				if len(fields) >= 3 and fields[2] == zone:
+					country_code = fields[0].split(",")[0]
+					break
+	except OSError:
+		return None
+	locale_name = COUNTRY_LOCALES.get(country_code)
+	supported_locales = get_supported_locales()
+	if locale_name and (not supported_locales or locale_name in supported_locales):
+		return locale_name
+	return None
+
 def _extract_zone(body, path):
 	if not path:
 		return body.strip()
