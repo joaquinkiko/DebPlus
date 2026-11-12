@@ -7,6 +7,7 @@ import re
 import subprocess
 import time
 import shutil
+import json
 from urllib.parse import urlparse
 from dataclasses import dataclass
 
@@ -32,7 +33,41 @@ REQUIRED_TOOLS = ("debootstrap", "parted", "wipefs", "partprobe", "blkid",
                   "lsblk", "chroot", "mkfs.fat", "mkfs.ext4", "mkfs.btrfs",
                   "mkfs.xfs", "mokutil", "timedatectl")
 ESP_RESERVE_GIB = 1
-                  
+
+TIMEZONE_LOOKUPS = (
+	("https://ipinfo.io/timezone", ()),
+	("https://ipapi.co/timezone", ()),
+	("https://ipwho.is/", ("timezone", "id")),
+	("https://freeipapi.com/api/json", ("timeZone",)),
+	("http://ip-api.com/json/?fields=timezone", ("timezone",)),
+)
+
+def _extract_zone(body, path):
+	if not path:
+		return body.strip()
+	value = json.loads(body)
+	for key in path:
+		value = value.get(key, {}) if isinstance(value, dict) else ""
+	return value if isinstance(value, str) else ""
+
+def detect_timezone():
+	"""(zone, reason): zone from the public IP, or None with the reason it failed."""
+	valid_zones = get_timezones()
+	reason = "no lookup responded"
+	for url, path in TIMEZONE_LOOKUPS:
+		result = run(["curl", "-sf", "--max-time", "5", "-A", "DebPlus", url])
+		if result.returncode != 0:
+			reason = f"{url} unreachable (curl exit {result.returncode})"
+			continue
+		try:
+			zone = _extract_zone(result.stdout, path)
+		except ValueError:
+			zone = ""
+		if zone in valid_zones:
+			return zone, ""
+		reason = f"{url} returned no valid zone"
+	return None, reason
+
 def disk_bytes(device):
 	return int(_query(["lsblk", "-bdno", "SIZE", device]) or 0)
 

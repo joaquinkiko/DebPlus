@@ -268,14 +268,23 @@ def keyboard(app):
 # ── Timezone ───────────────────────────────────────────────────────────
 
 def timezone(app):
+	app.online = utils.is_online()
 	all_zones = utils.get_timezones()
 	results = urwid.SimpleFocusListWalker([])
 	edit = urwid.Edit("  > ")
+	status = urwid.Text("")
 
 	def refresh(text):
 		pattern = text.strip().lower()
 		matches = [zone for zone in all_zones if pattern in zone.lower()]
 		_search_results(results, matches, lambda zone: _set(app, "timezone", zone))
+
+	def autodetect(_):
+		zone, reason = utils.detect_timezone()
+		if zone:
+			_set(app, "timezone", zone)
+		else:
+			status.set_text(("error", f"  Autodetect failed: {reason}"))
 
 	urwid.connect_signal(edit, "change", lambda _, text: refresh(text))
 	refresh("")
@@ -283,6 +292,13 @@ def timezone(app):
 	items = [
 		urwid.Text(("label", "  Scroll the list or type to filter (e.g., chicago, Europe/Oslo):")),
 		edit,
+	]
+	if app.online:
+		items += [
+			_action(("bold", "  Autodetect from network"), autodetect),
+			status,
+		]
+	items += [
 		urwid.BoxAdapter(urwid.ListBox(results), 14),
 		urwid.Divider(),
 		_back_button(app),
