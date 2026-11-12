@@ -233,7 +233,6 @@ class App:
 			urwid.Padding(urwid.Text(("title", LOGO)), align="center", width="pack"),
 			urwid.Divider(),
 			manual,
-			urwid.Text(("unset", "  Auto-Detect")),
 			abort,
 		])
 		pile.focus_position = 2  # Start Setup
