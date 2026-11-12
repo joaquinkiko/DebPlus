@@ -11,8 +11,24 @@ import urwid
 from . import utils
 from .widgets import Selectable, SubmitEdit
 
-KEYMAP_CHOICES = ["us", "gb", "de", "fr", "es", "it", "pt", "br",
-                  "ru", "pl", "se", "no", "fi", "dk", "ch", "jp"]
+KEYMAP_CHOICES = {
+	"us": "English (US)",
+	"gb": "English (UK)",
+	"de": "German",
+	"fr": "French",
+	"es": "Spanish",
+	"it": "Italian",
+	"pt": "Portuguese",
+	"br": "Portuguese (Brazil)",
+	"ru": "Russian",
+	"pl": "Polish",
+	"se": "Swedish",
+	"no": "Norwegian",
+	"fi": "Finnish",
+	"dk": "Danish",
+	"ch": "German (Switzerland)",
+	"jp": "Japanese",
+}
 FILESYSTEM_CHOICES = [
 	("btrfs", "Checksums and copy-on-write snapshots"),
 	("ext4",  "Simple and reliable"),
@@ -250,8 +266,8 @@ def keyboard(app):
 		else:
 			_set(app, "keymap", layout)
 
-	items = [_action(f"  {layout}", lambda _, v=layout: choose(v))
-	         for layout in KEYMAP_CHOICES]
+	items = [_action(f"  {layout:<6}{language}", lambda _, v=layout: choose(v))
+	         for layout, language in KEYMAP_CHOICES.items()]
 	urwid.connect_signal(edit, "activate", lambda _: choose(edit.edit_text.strip()))
 	items += [
 		urwid.Divider(),
