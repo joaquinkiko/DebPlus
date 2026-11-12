@@ -7,9 +7,9 @@ from .config import Config
 
 
 def main():
-	fake_mode = "--test" in sys.argv[1:]
-	if os.geteuid() != 0 and not fake_mode:
+	if os.geteuid() != 0:
 		sys.exit("Must be run as root")
+	fake_mode = "--test" in sys.argv[1:]
 	missing = utils.missing_tools()
 	if missing and not fake_mode:
 		sys.exit("This installer image is incomplete. Download it again.\n"

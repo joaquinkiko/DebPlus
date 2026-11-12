@@ -26,7 +26,7 @@ sudo bash build-iso.sh
 sudo apt install python3 python3-urwid
 
 # Start installer (--test ensures no accidental install)
-python3 -m installer --test
+sudo python3 -m installer --test
 ```
 
 ## Support
