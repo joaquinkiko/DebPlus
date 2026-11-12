@@ -37,6 +37,22 @@ RAIL_WIDTH = 26
 MAIN_FOOTER = "  Tab/↑↓ navigate  Enter select  Esc back  q quit"
 SCREEN_FOOTER = "  Tab/↑↓ navigate  Enter select  Esc back"
 
+SPLASH_FOOTER = "  Tab/↑↓ navigate  Enter select  q quit"
+LOGO = """
+       _,###._                                        ,#.                                    
+     ,#########.             ##:          :##        :###:                                   
+   .######^######.           ##'          `##         `#'                           ####     
+  .####'     `####       __  ##     __     ##  __      _     __          _          ####     
+  ####' ,###. `###:    ,####:##  ,######.  ##.#####. :### ,######. ###.####:       ,####.    
+  ###'  ##'`# ,###    ,##' `###  ##:  :##  ###' `###  ##' #:   `## `###' `##:    ##########  
+  ###.  ###._,###'    ##    `##  ##    ##  ##'   `##  ##    ___,##  ##:   `##    ##########  
+  `###  `######'      ##     ##  #######:  ##     ##  ##  .#######  ##'    ##    ##########  
+   `###    `"'        ##     ##  ##'       ##     ##  ##  ##'  `##  ##     ##      `####'    
+    `###.             ##.   ,##  ##        ##    ,##  ##  ##    ##  ##     ##       ####     
+      `###,           :#:._,###  ##:__,##  ##:__,##' ,##. ##.__:##. ##     ##       ####     
+        `"##:.        `:#### ###  ######'  `######'  #### `#####"## ##     ##                
+""".strip("\n")
+
 
 def _chosen_label(selected):
 	"""Rail value for an optional step: a count, or blank when nothing is chosen."""
@@ -51,6 +67,7 @@ class App:
 		self._menu_focus = 0
 		self._active_step = None
 		self.online = utils.is_online()
+		self._in_splash = False
 
 		self.frame = urwid.Frame(
 			urwid.SolidFill(),
@@ -68,7 +85,7 @@ class App:
 			unhandled_input=self._input,
 			input_filter=self._filter_input,
 		)
-		self.show_main()
+		self.show_splash()
 
 	def run(self):
 		self.loop.run()
@@ -80,9 +97,9 @@ class App:
 		        for key in keys]
 
 	def _input(self, key):
-		if key == "esc" and not self._in_main:
+		if key == "esc" and not self._in_main and not self._in_splash:
 			self.show_main()
-		elif key in ("q", "Q") and self._in_main:
+		elif key in ("q", "Q") and (self._in_main or self._in_splash):
 			raise urwid.ExitMainLoop()
 
 	def _make_header(self):
@@ -202,14 +219,37 @@ class App:
 		)
 		return urwid.AttrMap(box, "border")
 
+	def show_splash(self):
+		"""Logo and entry options, shown before the install menu."""
+		self._in_main = False
+		self._in_splash = True
+
+		manual = Selectable(("bold", "  Start Setup"))
+		urwid.connect_signal(manual, "activate", lambda _: self.show_main())
+		abort = Selectable(("bold", "  Abort"))
+		urwid.connect_signal(abort, "activate", lambda _: self._exit())
+
+		pile = urwid.Pile([
+			urwid.Padding(urwid.Text(("title", LOGO)), align="center", width="pack"),
+			urwid.Divider(),
+			manual,
+			urwid.Text(("unset", "  Auto-Detect")),
+			abort,
+		])
+		pile.focus_position = 2  # Start Setup
+
+		self.frame.body = urwid.Filler(pile, valign="middle")
+		self.frame.footer = self._make_footer(SPLASH_FOOTER)
+
 	def show_main(self):
 		"""Rail focused, install plan in the right pane."""
 		self.preflight = utils.preflight(self.config, self.online)
 
-		if not self._in_main:
+		if not (self._in_main or self._in_splash):
 			self._menu_focus += 1
 
 		self._in_main = True
+		self._in_splash = False
 		self._active_step = None
 
 		steps = self._steps()
