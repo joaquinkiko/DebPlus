@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import shlex
 
@@ -42,6 +43,77 @@ ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
 LUKS_ROOT = "cryptroot"
 LUKS_SWAP = "cryptswap"
 SWAP_KEY_LIVE = "/run/debplus/swap.key"
+
+PROGRESS_SECONDS_PER_PERCENT = 5
+PROGRESS_BAR_WIDTH = 40
+
+
+class Progress:
+	"""Bar on the terminal's last row. Creeps 1% per interval within a stage, capped at its weight."""
+
+	def __init__(self):
+		self.lock = threading.Lock()
+		self.stop_event = threading.Event()
+		self.done_percent = 0
+		self.stage_label = ""
+		self.stage_weight = 0
+		self.stage_started = 0.0
+		self.seconds_per_percent = PROGRESS_SECONDS_PER_PERCENT
+
+	def start(self):
+		rows = shutil.get_terminal_size().lines
+		sys.stdout.write(f"\x1b[1;{rows - 1}r")  # scrolling stops above the bar row
+		sys.stdout.flush()
+		threading.Thread(target=self._refresh_loop, daemon=True).start()
+
+	def stop(self):
+		with self.lock:
+			if self.stop_event.is_set():
+				return
+			self.stop_event.set()
+			rows = shutil.get_terminal_size().lines
+			sys.stdout.write(f"\x1b7\x1b[{rows};1H\x1b[2K\x1b[r\x1b8")
+			sys.stdout.flush()
+
+	def start_stage(self, label, weight, expected_seconds):
+		with self.lock:
+			self.stage_label = label
+			self.stage_weight = weight
+			self.seconds_per_percent = expected_seconds / weight
+			self.stage_started = time.monotonic()
+			self._draw()
+
+	def finish_stage(self):
+		with self.lock:
+			self.done_percent += self.stage_weight
+			self.stage_weight = 0
+			self._draw()
+
+
+	def _percent(self):
+		creep = 0
+		if self.stage_weight:
+			elapsed = time.monotonic() - self.stage_started
+			creep = min(self.stage_weight, int(elapsed // self.seconds_per_percent))
+		return self.done_percent + creep
+
+	def _draw(self):
+		percent = self._percent()
+		filled = percent * PROGRESS_BAR_WIDTH // 100
+		bar = "#" * filled + "-" * (PROGRESS_BAR_WIDTH - filled)
+		rows = shutil.get_terminal_size().lines
+		sys.stdout.write(f"\x1b7\x1b[{rows};1H\x1b[2K  [{bar}] {percent:3d}%  "
+		                 f"{self.stage_label}\x1b8")
+		sys.stdout.flush()
+
+	def _refresh_loop(self):
+		while not self.stop_event.wait(1):
+			with self.lock:
+				if not self.stop_event.is_set():
+					self._draw()
+
+
+PROGRESS = Progress()
 
 
 def _emit(text, stream=sys.stdout):
@@ -573,6 +645,7 @@ def install_bootloader(config: Config):
 # ── Cleanup and orchestration ─────────────────────────────────────────
 
 def cleanup():
+	PROGRESS.stop()
 	msg("Unmounting...")
 	if os.path.isdir(f"{MNT}/var/log"):
 		_try(f"cp {LOG_PATH} {MNT}/var/log/debplus-install.log")
@@ -605,12 +678,14 @@ def _mark_done(label):
 		state_file.write(label + "\n")
 
 
-def _run_stage(index, total, label, action):
+def _run_stage(index, total, label, weight, expected_seconds, action):
 	msg(f"[{index}/{total}] {label}")
+	PROGRESS.start_stage(label, weight, expected_seconds)
 	while True:
 		try:
 			action()
 			_mark_done(label)
+			PROGRESS.finish_stage()
 			return
 		except Exception as error:
 			_emit(f"\n  {RED}{BOLD}Error:{NC} {label} failed: {error}", sys.stderr)
@@ -628,6 +703,7 @@ def _run_stage(index, total, label, action):
 
 
 def run_install(config: Config):
+	PROGRESS.start()
 	_emit(f"\n  {BOLD}{CYAN}Installing {PROFILE['PROFILE_NAME']}{NC}\n")
 	_try(f"hostname {config.hostname}")
 	failures = []
@@ -641,17 +717,17 @@ def run_install(config: Config):
 		failures.extend(install_custom_software(config))
 
 	stages = [
-		("Partitioning", lambda: partition_disk(config)),
-		("Base system", lambda: install_base(config)),
-		("Configuration", lambda: configure_system(config)),
-		("Users", lambda: create_users(config)),
-		("Desktop", desktop_stage),
-		("Extras", extras_stage),
-		("Bootloader", lambda: install_bootloader(config)),
+		("Partitioning", lambda: partition_disk(config), 5, 20),
+		("Base system", lambda: install_base(config), 40, 600),
+		("Configuration", lambda: configure_system(config), 10, 120),
+		("Users", lambda: create_users(config), 2, 10),
+		("Desktop", desktop_stage, 20, 300),
+		("Extras", extras_stage, 15, 150),
+		("Bootloader", lambda: install_bootloader(config), 8, 60),
 	]
 	try:
-		for index, (label, action) in enumerate(stages, 1):
-			_run_stage(index, len(stages), label, action)
+		for index, (label, action, weight, expected_seconds) in enumerate(stages, 1):
+			_run_stage(index, len(stages), label, weight, expected_seconds, action)
 	except KeyboardInterrupt:
 		cleanup()
 		raise
@@ -676,6 +752,7 @@ def run_install(config: Config):
 	try:
 		time.sleep(30)
 	except KeyboardInterrupt:
+		PROGRESS.stop()
 		_emit("\n  Reboot cancelled. Target is still mounted at " + MNT + ".")
 		return
 	cleanup()
