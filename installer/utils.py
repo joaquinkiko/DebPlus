@@ -56,6 +56,51 @@ COUNTRY_LOCALES = {
 	"AU": "en_AU.UTF-8", "NZ": "en_NZ.UTF-8",
 }
 
+KEYBOARD_NAME_HINTS = (
+	("german", "de"), ("french", "fr"), ("spanish", "es"), ("italian", "it"),
+	("portuguese", "pt"), ("brazil", "br"), ("swedish", "se"), ("norwegian", "no"),
+	("danish", "dk"), ("finnish", "fi"), ("polish", "pl"), ("swiss", "ch"),
+	("japanese", "jp"), ("russian", "ru"),
+)
+
+LANGUAGE_NAMES_PATH = "/usr/share/iso-codes/json/iso_639-2.json"
+
+
+def language_names():
+	"""ISO 639-1 code -> English name, or empty dict if iso-codes is absent."""
+	try:
+		with open(LANGUAGE_NAMES_PATH) as names_file:
+			entries = json.load(names_file)["639-2"]
+	except (OSError, KeyError, ValueError):
+		return {}
+	return {entry["alpha_2"]: entry["name"] for entry in entries if "alpha_2" in entry}
+
+def locale_country(locale_name):
+	"""Territory code from a locale name, e.g. de_AT.UTF-8 -> AT, or empty string."""
+	base = locale_name.split(".")[0].split("@")[0]
+	parts = base.split("_")
+	return parts[1] if len(parts) > 1 else ""
+
+def locale_language(locale_name):
+	"""Language name for a locale code, or empty string if unknown."""
+	return language_names().get(locale_name.split("_")[0], "")
+
+
+def detect_keyboard_layout():
+	"""XKB layout guessed from keyboard device names, or None."""
+	try:
+		with open("/proc/bus/input/devices") as devices_file:
+			names = [line.split("=", 1)[1].strip().strip('"').lower()
+			         for line in devices_file
+			         if line.startswith("N: Name=") and "keyboard" in line.lower()]
+	except OSError:
+		return None
+	for name in names:
+		for hint, layout in KEYBOARD_NAME_HINTS:
+			if hint in name:
+				return layout
+	return None
+
 
 def locale_for_timezone(zone):
 	"""Installed UTF-8 locale for the zone's country, or None."""

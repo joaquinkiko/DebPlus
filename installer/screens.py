@@ -35,6 +35,8 @@ FILESYSTEM_CHOICES = [
 	("xfs",   "High throughput, large files"),
 ]
 
+LOCALE_RESULT_LIMIT = 40
+
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -77,11 +79,11 @@ def _set(app, attribute, value):
 	app.show_main()
 
 
-def _search_results(walker, matches, on_pick):
+def _search_results(walker, matches, on_pick, label=str):
 	"""Refill a results walker with selectable matches."""
 	walker.clear()
 	for match in matches:
-		walker.append(_action(f"    {match}", lambda _, v=match: on_pick(v)))
+		walker.append(_action(f"    {label(match)}", lambda _, v=match: on_pick(v)))
 
 
 def _on_toggle(_box, state, user_data):
@@ -351,10 +353,17 @@ def locale(app):
 		else:
 			_set(app, "locale", value)
 
+	searchable = {loc: f"{loc} {utils.locale_language(loc)} {utils.locale_country(loc)}".lower()
+	              for loc in utf8_locales}
+	labels = {loc: f"{loc:<18}{utils.locale_language(loc):<20}{utils.locale_country(loc)}"
+	          for loc in utf8_locales}
+
 	def refresh(text):
 		pattern = text.strip().lower()
-		matches = [loc for loc in utf8_locales if pattern in loc.lower()]
-		_search_results(results, matches, accept)
+		matches = [loc for loc in utf8_locales if pattern in searchable[loc]]
+		if pattern:
+			matches = matches[:LOCALE_RESULT_LIMIT]
+		_search_results(results, matches, accept, labels.get)
 
 	urwid.connect_signal(edit, "change", lambda _, text: refresh(text))
 	urwid.connect_signal(edit, "activate", lambda _: accept(edit.edit_text))
