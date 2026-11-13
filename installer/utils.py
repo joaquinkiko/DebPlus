@@ -7,6 +7,7 @@ import re
 import subprocess
 import time
 import shutil
+import json
 from urllib.parse import urlparse
 from dataclasses import dataclass
 
@@ -32,7 +33,119 @@ REQUIRED_TOOLS = ("debootstrap", "parted", "wipefs", "partprobe", "blkid",
                   "lsblk", "chroot", "mkfs.fat", "mkfs.ext4", "mkfs.btrfs",
                   "mkfs.xfs", "mokutil", "timedatectl")
 ESP_RESERVE_GIB = 1
-                  
+
+TIMEZONE_LOOKUPS = (
+	("https://ipinfo.io/timezone", ()),
+	("https://ipapi.co/timezone", ()),
+	("https://ipwho.is/", ("timezone", "id")),
+	("https://freeipapi.com/api/json", ("timeZone",)),
+	("http://ip-api.com/json/?fields=timezone", ("timezone",)),
+)
+
+COUNTRY_LOCALES = {
+	"US": "en_US.UTF-8", "GB": "en_GB.UTF-8", "IE": "en_IE.UTF-8",
+	"DE": "de_DE.UTF-8", "AT": "de_AT.UTF-8", "CH": "de_CH.UTF-8",
+	"FR": "fr_FR.UTF-8", "BE": "fr_BE.UTF-8", "ES": "es_ES.UTF-8",
+	"MX": "es_MX.UTF-8", "AR": "es_AR.UTF-8", "IT": "it_IT.UTF-8",
+	"PT": "pt_PT.UTF-8", "BR": "pt_BR.UTF-8", "NL": "nl_NL.UTF-8",
+	"SE": "sv_SE.UTF-8", "NO": "nb_NO.UTF-8", "DK": "da_DK.UTF-8",
+	"FI": "fi_FI.UTF-8", "PL": "pl_PL.UTF-8", "RU": "ru_RU.UTF-8",
+	"JP": "ja_JP.UTF-8", "CN": "zh_CN.UTF-8", "KR": "ko_KR.UTF-8",
+	"CZ": "cs_CZ.UTF-8", "HU": "hu_HU.UTF-8", "GR": "el_GR.UTF-8",
+	"TR": "tr_TR.UTF-8", "UA": "uk_UA.UTF-8", "CA": "en_CA.UTF-8",
+	"AU": "en_AU.UTF-8", "NZ": "en_NZ.UTF-8",
+}
+
+KEYBOARD_NAME_HINTS = (
+	("german", "de"), ("french", "fr"), ("spanish", "es"), ("italian", "it"),
+	("portuguese", "pt"), ("brazil", "br"), ("swedish", "se"), ("norwegian", "no"),
+	("danish", "dk"), ("finnish", "fi"), ("polish", "pl"), ("swiss", "ch"),
+	("japanese", "jp"), ("russian", "ru"),
+)
+
+LANGUAGE_NAMES_PATH = "/usr/share/iso-codes/json/iso_639-2.json"
+
+
+def language_names():
+	"""ISO 639-1 code -> English name, or empty dict if iso-codes is absent."""
+	try:
+		with open(LANGUAGE_NAMES_PATH) as names_file:
+			entries = json.load(names_file)["639-2"]
+	except (OSError, KeyError, ValueError):
+		return {}
+	return {entry["alpha_2"]: entry["name"] for entry in entries if "alpha_2" in entry}
+
+def locale_country(locale_name):
+	"""Territory code from a locale name, e.g. de_AT.UTF-8 -> AT, or empty string."""
+	base = locale_name.split(".")[0].split("@")[0]
+	parts = base.split("_")
+	return parts[1] if len(parts) > 1 else ""
+
+def locale_language(locale_name):
+	"""Language name for a locale code, or empty string if unknown."""
+	return language_names().get(locale_name.split("_")[0], "")
+
+
+def detect_keyboard_layout():
+	"""XKB layout guessed from keyboard device names, or None."""
+	try:
+		with open("/proc/bus/input/devices") as devices_file:
+			names = [line.split("=", 1)[1].strip().strip('"').lower()
+			         for line in devices_file
+			         if line.startswith("N: Name=") and "keyboard" in line.lower()]
+	except OSError:
+		return None
+	for name in names:
+		for hint, layout in KEYBOARD_NAME_HINTS:
+			if hint in name:
+				return layout
+	return None
+
+
+def locale_for_timezone(zone):
+	"""Installed UTF-8 locale for the zone's country, or None."""
+	country_code = ""
+	try:
+		with open("/usr/share/zoneinfo/zone.tab") as zone_file:
+			for line in zone_file:
+				fields = line.split()
+				if len(fields) >= 3 and fields[2] == zone:
+					country_code = fields[0].split(",")[0]
+					break
+	except OSError:
+		return None
+	locale_name = COUNTRY_LOCALES.get(country_code)
+	supported_locales = get_supported_locales()
+	if locale_name and (not supported_locales or locale_name in supported_locales):
+		return locale_name
+	return None
+
+def _extract_zone(body, path):
+	if not path:
+		return body.strip()
+	value = json.loads(body)
+	for key in path:
+		value = value.get(key, {}) if isinstance(value, dict) else ""
+	return value if isinstance(value, str) else ""
+
+def detect_timezone():
+	"""(zone, reason): zone from the public IP, or None with the reason it failed."""
+	valid_zones = get_timezones()
+	reason = "no lookup responded"
+	for url, path in TIMEZONE_LOOKUPS:
+		result = run(["curl", "-sf", "--max-time", "5", "-A", "DebPlus", url])
+		if result.returncode != 0:
+			reason = f"{url} unreachable (curl exit {result.returncode})"
+			continue
+		try:
+			zone = _extract_zone(result.stdout, path)
+		except ValueError:
+			zone = ""
+		if zone in valid_zones:
+			return zone, ""
+		reason = f"{url} returned no valid zone"
+	return None, reason
+
 def disk_bytes(device):
 	return int(_query(["lsblk", "-bdno", "SIZE", device]) or 0)
 

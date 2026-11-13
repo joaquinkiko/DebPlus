@@ -11,13 +11,31 @@ import urwid
 from . import utils
 from .widgets import Selectable, SubmitEdit
 
-KEYMAP_CHOICES = ["us", "gb", "de", "fr", "es", "it", "pt", "br",
-                  "ru", "pl", "se", "no", "fi", "dk", "ch", "jp"]
+KEYMAP_CHOICES = {
+	"us": "English (US)",
+	"gb": "English (UK)",
+	"de": "German",
+	"fr": "French",
+	"es": "Spanish",
+	"it": "Italian",
+	"pt": "Portuguese",
+	"br": "Portuguese (Brazil)",
+	"ru": "Russian",
+	"pl": "Polish",
+	"se": "Swedish",
+	"no": "Norwegian",
+	"fi": "Finnish",
+	"dk": "Danish",
+	"ch": "German (Switzerland)",
+	"jp": "Japanese",
+}
 FILESYSTEM_CHOICES = [
 	("btrfs", "Checksums and copy-on-write snapshots"),
 	("ext4",  "Simple and reliable"),
 	("xfs",   "High throughput, large files"),
 ]
+
+LOCALE_RESULT_LIMIT = 40
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
@@ -61,11 +79,11 @@ def _set(app, attribute, value):
 	app.show_main()
 
 
-def _search_results(walker, matches, on_pick):
+def _search_results(walker, matches, on_pick, label=str):
 	"""Refill a results walker with selectable matches."""
 	walker.clear()
 	for match in matches:
-		walker.append(_action(f"    {match}", lambda _, v=match: on_pick(v)))
+		walker.append(_action(f"    {label(match)}", lambda _, v=match: on_pick(v)))
 
 
 def _on_toggle(_box, state, user_data):
@@ -250,8 +268,8 @@ def keyboard(app):
 		else:
 			_set(app, "keymap", layout)
 
-	items = [_action(f"  {layout}", lambda _, v=layout: choose(v))
-	         for layout in KEYMAP_CHOICES]
+	items = [_action(f"  {layout:<6}{language}", lambda _, v=layout: choose(v))
+	         for layout, language in KEYMAP_CHOICES.items()]
 	urwid.connect_signal(edit, "activate", lambda _: choose(edit.edit_text.strip()))
 	items += [
 		urwid.Divider(),
@@ -267,15 +285,30 @@ def keyboard(app):
 
 # ── Timezone ───────────────────────────────────────────────────────────
 
+def _pick_timezone(app, zone):
+	if not app.config.locale:
+		app.config.locale = utils.locale_for_timezone(zone) or ""
+	_set(app, "timezone", zone)
+
+
 def timezone(app):
+	app.online = utils.is_online()
 	all_zones = utils.get_timezones()
 	results = urwid.SimpleFocusListWalker([])
 	edit = urwid.Edit("  > ")
+	status = urwid.Text("")
 
 	def refresh(text):
 		pattern = text.strip().lower()
 		matches = [zone for zone in all_zones if pattern in zone.lower()]
-		_search_results(results, matches, lambda zone: _set(app, "timezone", zone))
+		_search_results(results, matches, lambda zone: _pick_timezone(app, zone))
+
+	def autodetect(_):
+		zone, reason = utils.detect_timezone()
+		if zone:
+			_pick_timezone(app, zone)
+		else:
+			status.set_text(("error", f"  Autodetect failed: {reason}"))
 
 	urwid.connect_signal(edit, "change", lambda _, text: refresh(text))
 	refresh("")
@@ -283,6 +316,13 @@ def timezone(app):
 	items = [
 		urwid.Text(("label", "  Scroll the list or type to filter (e.g., chicago, Europe/Oslo):")),
 		edit,
+	]
+	if app.online:
+		items += [
+			_action(("bold", "  Autodetect from network"), autodetect),
+			status,
+		]
+	items += [
 		urwid.BoxAdapter(urwid.ListBox(results), 14),
 		urwid.Divider(),
 		_back_button(app),
@@ -313,10 +353,17 @@ def locale(app):
 		else:
 			_set(app, "locale", value)
 
+	searchable = {loc: f"{loc} {utils.locale_language(loc)} {utils.locale_country(loc)}".lower()
+	              for loc in utf8_locales}
+	labels = {loc: f"{loc:<18}{utils.locale_language(loc):<20}{utils.locale_country(loc)}"
+	          for loc in utf8_locales}
+
 	def refresh(text):
 		pattern = text.strip().lower()
-		matches = [loc for loc in utf8_locales if pattern in loc.lower()]
-		_search_results(results, matches, accept)
+		matches = [loc for loc in utf8_locales if pattern in searchable[loc]]
+		if pattern:
+			matches = matches[:LOCALE_RESULT_LIMIT]
+		_search_results(results, matches, accept, labels.get)
 
 	urwid.connect_signal(edit, "change", lambda _, text: refresh(text))
 	urwid.connect_signal(edit, "activate", lambda _: accept(edit.edit_text))
