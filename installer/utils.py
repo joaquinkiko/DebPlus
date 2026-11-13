@@ -150,12 +150,6 @@ def disk_bytes(device):
 	return int(_query(["lsblk", "-bdno", "SIZE", device]) or 0)
 
 
-	def swap_gib(self, ram_gib: int, disk_gib: int) -> int:
-		"""Swap equal to RAM, limited so root keeps its minimum. 0 means no room."""
-		reserve = MIN_DISK_GIB + (ESP_RESERVE_GIB if self.boot_mode == "uefi" else 0)
-		return max(0, min(ram_gib, disk_gib - reserve))
-
-
 @dataclass
 class Check:
 	level: str  # "block", "warn", or "ok"

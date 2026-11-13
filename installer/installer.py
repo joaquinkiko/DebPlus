@@ -176,9 +176,11 @@ def _partition_auto(config: Config):
 	uefi = config.boot_mode == "uefi"
 	filesystem_hint = PARTED_FS_HINT[config.filesystem]
 	ram_gib = -(-utils.ram_mib() // 1024)
-	disk_gib = utils.disk_bytes(config.disk) // 2**30
+	disk_mib = utils.disk_bytes(config.disk) // 2**20
+	disk_gib = disk_mib // 1024
 	swap_gib = config.swap_gib(ram_gib, disk_gib) if config.has_swap_partition() else 0
 	swap = swap_gib > 0
+	swap_start = f"{disk_mib - swap_gib * 1024}MiB"
 	steps = ["mklabel gpt"]
 	if uefi:
 		roles = ["esp", "root"]
@@ -188,11 +190,11 @@ def _partition_auto(config: Config):
 		roles = ["bios_grub", "root"]
 		steps.append("mkpart bios_grub 1MiB 2MiB set 1 bios_grub on")
 		root_start = "2MiB"
-	root_end = f"-{swap_gib}GiB" if swap else "100%"
+	root_end = swap_start if swap else "100%"
 	steps.append(f"mkpart root {filesystem_hint} {root_start} {root_end}")
 	if swap:
 		roles.append("swap")
-		steps.append(f"mkpart swap linux-swap -{swap_gib}GiB 100%")
+		steps.append(f"mkpart swap linux-swap {swap_start} 100%")
 	_run(f"wipefs -af {config.disk}", quiet=True)
 	_run(f"parted -s {config.disk} {' '.join(steps)}", quiet=True)
 	partitions = _wait_for_partitions(config.disk, len(roles))

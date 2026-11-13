@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 
+from .utils import ESP_RESERVE_GIB, MIN_DISK_GIB
+
 # Fields that must be set before Install unlocks. Everything else is optional.
 REQUIRED_FIELDS = (
 	"keymap", "timezone", "locale", "disk", "filesystem",
@@ -82,3 +84,8 @@ class Config:
 
 	def desktop_label(self) -> str:
 		return self.custom_repo if self.desktop == "custom" else self.desktop
+
+	def swap_gib(self, ram_gib: int, disk_gib: int) -> int:
+		"""Swap equal to RAM, limited so root keeps its minimum. 0 means no room."""
+		reserve = MIN_DISK_GIB + (ESP_RESERVE_GIB if self.boot_mode == "uefi" else 0)
+		return max(0, min(ram_gib, disk_gib - reserve))
