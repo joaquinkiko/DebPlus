@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build the DebPlus installer ISO. Run as root on a Debian host.
-# Requires: debootstrap, xorriso, mksquashfs (squashfs-tools), mtools,
+# Requires: debootstrap, xorriso, mksquashfs (squashfs-tools), mtools, debian-archive-keyring
 # grub-pc-bin, grub-efi-amd64-bin.
 
 set -euo pipefail
@@ -13,6 +13,7 @@ ROOTFS_DIR="$WORK_DIR/rootfs"
 ISO_DIR="$WORK_DIR/iso"
 BUILD_DATE="$(date +%Y%m%d)"
 ISO_OUTPUT="$SCRIPT_DIR/${PROFILE_SLUG}-${SUITE}-${BUILD_DATE}.iso"
+KEYRING=/usr/share/keyrings/debian-archive-keyring.gpg
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 msg() { echo ":: $*"; }
@@ -24,22 +25,72 @@ cleanup_mounts() {
 }
 trap cleanup_mounts EXIT
 
-[[ $EUID -eq 0 ]] || die "Must be run as root"
-for command_name in debootstrap xorriso mksquashfs grub-mkrescue; do
-	command -v "$command_name" >/dev/null || die "Missing: $command_name"
-done
-[ -d /usr/lib/grub/i386-pc ] || die "Missing grub BIOS modules (grub-pc-bin)"
-[ -d /usr/lib/grub/x86_64-efi ] || die "Missing grub UEFI modules (grub-efi-amd64-bin)"
+preflight() {
+	local -a problems=()
+	local cmd pkg var f
+
+	[[ $EUID -eq 0 ]] || die "Must be run as root"
+
+	# command -> package that provides it
+	local -A cmd_pkg=(
+		[debootstrap]=debootstrap
+		[xorriso]=xorriso
+		[mksquashfs]=squashfs-tools
+		[grub-mkrescue]=grub-common
+		[mformat]=mtools
+		[findmnt]=util-linux
+		[mount]=mount
+		[umount]=mount
+		[chroot]=coreutils
+	)
+	for cmd in "${!cmd_pkg[@]}"; do
+		command -v "$cmd" >/dev/null 2>&1 || problems+=("missing command '$cmd' (apt install ${cmd_pkg[$cmd]})")
+	done
+
+	# Keyring, GRUB modules
+	[ -f "$KEYRING" ] || problems+=("missing $KEYRING (apt install debian-archive-keyring)")
+	[ -d /usr/lib/grub/i386-pc ] || problems+=("missing GRUB BIOS modules (apt install grub-pc-bin)")
+	[ -d /usr/lib/grub/x86_64-efi ] || problems+=("missing GRUB UEFI modules (apt install grub-efi-amd64-bin)")
+
+	# profile.env variables
+	for var in PROFILE_SLUG SUITE MIRROR ISO_LABEL; do
+		[ -n "${!var:-}" ] || problems+=("profile.env does not set $var")
+	done
+
+	# Input files and directories
+	for f in packages/live.list packages/target.list packages/firmware.list profile.env; do
+		[ -f "$SCRIPT_DIR/$f" ] || problems+=("missing file $f")
+	done
+	for f in installer options/custom options/wm; do
+		[ -d "$SCRIPT_DIR/$f" ] || problems+=("missing directory $f")
+	done
+	compgen -G "$SCRIPT_DIR/options/*.list" >/dev/null || problems+=("no options/*.list files found")
+	[ -f /etc/resolv.conf ] || problems+=("host has no /etc/resolv.conf (needed for chroot networking)")
+
+	# Disk space (rootfs + squashfs + ISO), ~6 GiB to be safe
+	local free_kb
+	free_kb="$(df --output=avail -k "$SCRIPT_DIR" | tail -n1 | tr -d ' ')"
+	(( free_kb >= 6 * 1024 * 1024 )) || problems+=("less than 6 GiB free in $SCRIPT_DIR")
+
+	if (( ${#problems[@]} )); then
+		echo "ERROR: preflight failed:" >&2
+		printf '  - %s\n' "${problems[@]}" >&2
+		exit 1
+	fi
+}
+preflight
 
 cleanup_mounts
-if findmnt -rnlo TARGET | grep -q "^$WORK_DIR/"; then
+if findmnt -rno TARGET | grep -qF "$WORK_DIR/"; then
 	die "Mounts still active under $WORK_DIR, unmount them before rebuilding"
 fi
 rm -rf "$WORK_DIR"
 mkdir -p "$ROOTFS_DIR" "$ISO_DIR/boot/grub" "$ISO_DIR/live"
 
 msg "Debootstrapping live environment..."
-debootstrap --arch=amd64 --variant=minbase "$SUITE" "$ROOTFS_DIR" "$MIRROR"
+debootstrap --arch=amd64 --variant=minbase \
+	--keyring=/usr/share/keyrings/debian-archive-keyring.gpg \
+	"$SUITE" "$ROOTFS_DIR" "$MIRROR"
 
 mount --bind /dev "$ROOTFS_DIR/dev"
 mount --bind /dev/pts "$ROOTFS_DIR/dev/pts"
@@ -152,7 +203,7 @@ grub-mkrescue -o "$ISO_OUTPUT" "$ISO_DIR" \
 	-boot_image any mbr_force_bootable=on
 
 cleanup_mounts
-if findmnt -rnlo TARGET | grep -q "^$WORK_DIR/"; then
+if findmnt -rno TARGET | grep -qF "$WORK_DIR/"; then
 	die "Mounts still active under $WORK_DIR, unmount them before rebuilding"
 fi
 rm -rf "$WORK_DIR"
