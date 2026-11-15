@@ -15,18 +15,18 @@ hardware|CPU|amd64-microcode|AMD CPU microcode|non-free-firmware|bake
 
 hardware|Audio|firmware-sof-signed|Intel audio firmware (SOF)|non-free-firmware|bake
 
-hardware|Power|tlp|TLP power management (laptops)|-
-hardware|Power|thermald|Intel thermal daemon|-
+hardware|Power|tlp|TLP power management (laptops)|-|bake
+hardware|Power|thermald|Intel thermal daemon|-|bake
 
-hardware|Bluetooth|bluez|Bluetooth|-
+hardware|Bluetooth|bluez|Bluetooth|-|bake
 hardware|Bluetooth|firmware-realtek firmware-atheros firmware-mediatek|Bluetooth firmware|non-free-firmware|bake
 
-hardware|Printing|cups cups-filters cups-browsed avahi-daemon|Printing service (CUPS)|-
-hardware|Printing|printer-driver-gutenprint hplip printer-driver-escpr printer-driver-brlaser printer-driver-splix|Printer drivers|cups
+hardware|Printing|cups cups-filters cups-browsed avahi-daemon|Printing service (CUPS)|-|bake
+hardware|Printing|printer-driver-gutenprint hplip printer-driver-escpr printer-driver-brlaser printer-driver-splix|Printer drivers|cups|bake
 
-hardware|Scanning|sane-utils|Scanner support|-
+hardware|Scanning|sane-utils|Scanner support|-|bake
 
-hardware|Sensors|lm-sensors|Hardware sensors|-
+hardware|Sensors|lm-sensors|Hardware sensors|-|bake
 
 hardware|Wi-Fi|firmware-iwlwifi firmware-realtek firmware-atheros firmware-brcm80211 firmware-mediatek|Wi-Fi firmware|non-free-firmware|bake
 
