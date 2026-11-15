@@ -9,6 +9,7 @@ hardware|Graphics|firmware-amd-graphics mesa-va-drivers|AMD GPU firmware|non-fre
 hardware|Graphics|firmware-intel-graphics intel-media-va-driver|Intel GPU firmware|non-free-firmware|bake
 hardware|Graphics|firmware-nvidia-graphics nvidia-detect nvidia-driver linux-headers-amd64|NVIDIA driver|non-free-firmware,non-free|bake
 hardware|Graphics|nvidia-settings|NVIDIA settings panel|nvidia-driver|bake
+hardware|Graphics|switcheroo-control|Hybrid graphics switching (laptops)|-|bake
 
 hardware|CPU|intel-microcode|Intel CPU microcode|non-free-firmware|bake
 hardware|CPU|amd64-microcode|AMD CPU microcode|non-free-firmware|bake
@@ -51,6 +52,9 @@ software|Media Editor|darktable|Darktable|-
 software|Media Editor|blender|Blender|-
 software|Media Editor|audacity|Audacity|-
 
+software|Codecs|ffmpeg libavcodec-extra vainfo mesa-vdpau-drivers|Video and audio codecs|-
+software|Codecs|libdvd-pkg|DVD playback|contrib
+
 software|Office|libreoffice|LibreOffice suite|-
 
 software|Communication|thunderbird|Thunderbird|-
@@ -68,12 +72,16 @@ software|Gaming|lutris|Lutris|-
 
 software|Fonts|fonts-recommended|Recommended Fonts|-
 software|Fonts|fonts-font-awesome|Font Awesome|-
+software|Fonts|fonts-noto-core fonts-noto-mono|Noto fonts|-
+software|Fonts|fonts-noto-color-emoji|Emoji font|-
+software|Fonts|fonts-noto-cjk|Chinese, Japanese, Korean fonts|-
 
 software|Text Editing|vim|Vim|-
 software|Text Editing|neovim|NeoVim|-
 
 software|Downloading|qbittorrent|QBitTorrent|-
 
+software|Utilities|openssh-server openssh-client|OpenSSH|-|bake
 software|Utilities|htop|Htop|-
 software|Utilities|btop|Btop|-
 software|Utilities|tmux|Terminal Multiplexer|-
