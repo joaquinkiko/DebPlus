@@ -13,8 +13,8 @@ import shlex
 
 from . import utils
 from .config import Config
-from .utils import (FIRMWARE_PATH, MNT, PROFILE, TARGET_PACKAGES_PATH,
-                    desktop_rows, get_partitions, keyboard_config, read_lines)
+from .utils import (FIRMWARE_PATH, MNT, PROFILE,
+                    get_partitions, keyboard_config, read_lines)
 
 BOLD = "\033[1m"
 RED = "\033[0;31m"
@@ -25,8 +25,6 @@ NC = "\033[0m"
 SUITE = PROFILE["SUITE"]
 MIRROR = PROFILE["MIRROR"]
 PARTED_FS_HINT = {"btrfs": "btrfs", "ext4": "ext4", "xfs": "ext2"}
-BOOT_PACKAGES = {"uefi": ["shim-signed", "grub-efi-amd64-signed", "efibootmgr"],
-                 "bios": ["grub-pc"]}
 FSTAB_OPTIONS = {
 	"btrfs": "defaults,compress=zstd,noatime",
 	"ext4": "errors=remount-ro",
@@ -229,13 +227,21 @@ def _mount_layout(config: Config):
 		_run(f"umount {MNT}")
 	subvolume_option = "-o subvol=@ " if btrfs else ""
 	_run(f"mount {subvolume_option}{root} {MNT}")
+
+
+def mount_secondary(config: Config):
+	"""Mount /home and the ESP. Runs after extraction so the image never writes onto them."""
+	layout = config.layout
+	root = _device(config, "root")
+	home = None
 	if "home" in layout:
+		home = layout["home"]["device"]
+	elif config.filesystem == "btrfs":
+		home = f"-o subvol=@home {root}"
+	if home and not os.path.ismount(f"{MNT}/home"):
 		os.makedirs(f"{MNT}/home", exist_ok=True)
-		_run(f"mount {layout['home']['device']} {MNT}/home")
-	elif btrfs:
-		os.makedirs(f"{MNT}/home", exist_ok=True)
-		_run(f"mount -o subvol=@home {root} {MNT}/home")
-	if "esp" in layout:
+		_run(f"mount {home} {MNT}/home")
+	if "esp" in layout and not os.path.ismount(f"{MNT}/boot/efi"):
 		os.makedirs(f"{MNT}/boot/efi", exist_ok=True)
 		_run(f"mount {layout['esp']['device']} {MNT}/boot/efi")
 
@@ -367,52 +373,113 @@ def write_apt_sources(config: Config):
 
 # ── Base system ────────────────────────────────────────────────────────
 
-def _extra_packages(config: Config):
-	packages = []
-	if config.luks:
-		packages += ["cryptsetup", "cryptsetup-initramfs", "console-setup"]
-	if config.snapper:
-		packages.append("snapper")
-	if config.auto_updates:
-		packages.append("unattended-upgrades")
-	return packages
+# Optional packages and the Config flag that installs each
+OPTIONAL_INSTALL = (
+	("cryptsetup", "luks"), ("cryptsetup-initramfs", "luks"),
+	("snapper", "snapper"), ("unattended-upgrades", "auto_updates"),
+	("systemd-zram-generator", "zram"),
+)
+APT = "env DEBIAN_FRONTEND=noninteractive apt-get"
+LOCAL_REPO_MOUNT = "/media/debplus-repo"  # inside the target, only during install
+# Offline apt: read only the local repo. Check-Date off because an offline RTC is often wrong.
+LOCAL_APT = ("-o Dir::Etc::sourcelist=debplus-local.list -o Dir::Etc::sourceparts=- "
+	            "-o APT::Sandbox::User=root -o Acquire::Check-Date=false")
+
+
+def packages_to_install(config: Config) -> list:
+	"""Packages beyond the base image: bootloader, chosen options, shipped extras."""
+	wanted = set(utils.boot_packages(config.boot_mode))
+	wanted |= {package for package, flag in OPTIONAL_INSTALL if getattr(config, flag)}
+	if "non-free-firmware" in config.components:
+		wanted |= set(read_lines(FIRMWARE_PATH))
+	for entry in config.hardware_packages + config.software_packages:
+		if not utils.needs_network(entry):  # shipped on the ISO. The rest go through install_extras
+			wanted |= set(entry.split())
+	return sorted(wanted)
+
+
+def _unmount_all():
+	"""Release chroot and secondary mounts so a retried extraction starts clean."""
+	for sub in ("sys/firmware/efi/efivars", "sys", "proc", "dev/pts", "dev", "boot/efi", "home"):
+		_try(f"umount -l {MNT}/{sub}")
+
+
+def reset_identity():
+	"""The image is shared by every install, so give this one its own identity."""
+	msg("Resetting machine identity...")
+	with open(f"{MNT}/etc/machine-id", "w"):
+		pass  # empty file: systemd generates a new id on first boot
+	_try(f"rm -f {MNT}/var/lib/dbus/machine-id")
+	_try(f"ln -s /etc/machine-id {MNT}/var/lib/dbus/machine-id")
+	_try(f"rm -f {MNT}/etc/ssh/ssh_host_*")
+	_try(f"chroot {MNT} sh -c 'dpkg -s openssh-server >/dev/null 2>&1 && "
+	     f"dpkg-reconfigure -f noninteractive openssh-server'")
+
+
+def _install_from_local_repo(packages):
+	"""Offline install: apt reads only the repo bind-mounted from the install medium."""
+	repo = utils.target_repo()
+	if not repo:
+		die("Package repo not found on the install medium.")
+	msg("Installing selected packages from the install medium...")
+	mount_point = f"{MNT}{LOCAL_REPO_MOUNT}"
+	os.makedirs(mount_point, exist_ok=True)
+	_run(f"mount --bind {shlex.quote(repo)} {mount_point}")
+	try:
+		with open(f"{MNT}/etc/apt/debplus-local.list", "w") as source_file:
+			source_file.write(f"deb [trusted=yes] file:{LOCAL_REPO_MOUNT} ./\n")
+		_run(f"chroot {MNT} {APT} {LOCAL_APT} update", quiet=True)
+		_run(f"chroot {MNT} {APT} {LOCAL_APT} install -y --no-install-recommends "
+		     f"{' '.join(packages)}", quiet=True)
+	finally:
+		_try(f"umount {mount_point}")
+		_try(f"rmdir {mount_point}")
+		_try(f"rm -f {MNT}/etc/apt/debplus-local.list")
+		_try(f"rm -rf {MNT}/var/lib/apt/lists/*")
+
+
+def install_packages(config: Config):
+	"""Install the packages this install needs, then bring the system up to date if online."""
+	packages = packages_to_install(config)
+	if config.boot_mode == "bios":
+		# Empty install_devices keeps grub-pc from prompting. The bootloader stage installs GRUB.
+		_run(f"chroot {MNT} sh -c \"echo 'grub-pc grub-pc/install_devices string' "
+		     f"| debconf-set-selections\"")
+	if not config.online:
+		if packages:
+			_install_from_local_repo(packages)
+		return
+	msg("Updating packages...")
+	_run(f"chroot {MNT} {APT} update")
+	if packages:
+		_run(f"chroot {MNT} {APT} install -y --no-install-recommends {' '.join(packages)}")
+	_run(f"chroot {MNT} {APT} upgrade -y")
+	if config.backports_kernel:
+		msg("Installing backports kernel...")
+		_run(f"chroot {MNT} {APT} install -y -t {SUITE}-backports "
+		     f"linux-image-amd64 linux-headers-amd64")
+	if config.backports_mesa:
+		msg("Installing backports Mesa...")
+		_run(f"chroot {MNT} {APT} install -y -t {SUITE}-backports {' '.join(MESA_PACKAGES)}")
+	_run(f"chroot {MNT} apt-get clean")
 
 
 def install_base(config: Config):
-	msg("Running debootstrap (this will take a while)...")
-	_run(f"debootstrap --arch=amd64 --variant=minbase {SUITE} {MNT} {MIRROR}")
+	image = utils.target_image()
+	if not image:
+		die("Base system image not found on the install medium.")
+	_unmount_all()
+	msg("Extracting base system (this will take a while)...")
+	_run(f"unsquashfs -f -n -d {MNT} {shlex.quote(image)}")
+	_try(f"rm -f {MNT}/etc/resolv.conf")
 	shutil.copy2("/etc/resolv.conf", f"{MNT}/etc/resolv.conf")
+	mount_secondary(config)
 	write_apt_sources(config)
 	mount_chroot_fs()
-
-	if config.boot_mode == "bios":
-		# Keeps grub-pc from prompting for a target device during install
-		_run(f"chroot {MNT} sh -c \"echo 'grub-pc grub-pc/install_devices string' "
-		     f"| debconf-set-selections\"")
+	reset_identity()
 	if config.multiarch_i386:
 		_run(f"chroot {MNT} dpkg --add-architecture i386")
-
-	msg("Installing base system...")
-	packages = read_lines(TARGET_PACKAGES_PATH) + BOOT_PACKAGES[config.boot_mode] + _extra_packages(config)
-	if config.zram:
-		packages.append("systemd-zram-generator")
-	if "non-free-firmware" in config.components:
-		packages += read_lines(FIRMWARE_PATH)
-	_run(f"chroot {MNT} env DEBIAN_FRONTEND=noninteractive apt-get update")
-	_run(f"chroot {MNT} env DEBIAN_FRONTEND=noninteractive apt-get install -y "
-	     f"--no-install-recommends {' '.join(packages)}")
-
-	if config.backports_kernel:
-		msg("Installing backports kernel...")
-		_run(f"chroot {MNT} env DEBIAN_FRONTEND=noninteractive apt-get install -y "
-		     f"-t {SUITE}-backports linux-image-amd64 linux-headers-amd64")
-
-	if config.backports_mesa:
-		msg("Installing backports Mesa...")
-		_run(f"chroot {MNT} env DEBIAN_FRONTEND=noninteractive apt-get install -y "
-		     f"-t {SUITE}-backports {' '.join(MESA_PACKAGES)}")
-
-	_run(f"chroot {MNT} apt-get clean")
+	install_packages(config)
 	ok("Base system installed")
 
 
@@ -437,7 +504,6 @@ def configure_encryption(config: Config):
 		crypttab_file.write("\n".join(lines) + "\n")
 	with open(f"{MNT}/etc/default/grub", "a") as grub_file:
 		grub_file.write("GRUB_ENABLE_CRYPTODISK=y\n")
-	_run(f"chroot {MNT} update-initramfs -u -k all")
 	ok("Encryption configured")
 
 
@@ -498,6 +564,8 @@ def configure_system(config: Config):
 	if config.auto_updates:
 		configure_auto_updates()
 	
+	msg("Rebuilding initramfs...")  # fstab and crypttab exist now
+	_run(f"chroot {MNT} update-initramfs -u -k all")
 	ok("System configured")
 
 
@@ -588,6 +656,8 @@ def install_extras(config: Config) -> list:
 	            if package not in custom_ids]
 	failed = []
 	for package in packages:
+		if not utils.needs_network(package):
+			continue  # shipped in the local repo, already installed with the base packages
 		label = labels.get(package, package)
 		msg(f"Installing {label}...")
 		result = subprocess.run(f"chroot {MNT} env DEBIAN_FRONTEND=noninteractive "
@@ -635,6 +705,8 @@ def _install_removable_fallback():
 def install_bootloader(config: Config):
 	msg(f"Installing bootloader ({config.boot_mode})...")
 	if config.boot_mode == "uefi":
+		_run(f"chroot {MNT} grub-install --target=x86_64-efi --efi-directory=/boot/efi "
+		     f"--bootloader-id=debian --recheck")
 		if not os.path.isfile(f"{MNT}/boot/efi/EFI/debian/shimx64.efi"):
 			die("Signed shim was not installed to the EFI partition.")
 		_install_removable_fallback()
@@ -720,7 +792,7 @@ def run_install(config: Config):
 
 	stages = [
 		("Partitioning", lambda: partition_disk(config), 5, 20),
-		("Base system", lambda: install_base(config), 40, 600),
+		("Base system", lambda: install_base(config), 40, 300),
 		("Configuration", lambda: configure_system(config), 10, 120),
 		("Users", lambda: create_users(config), 2, 10),
 		("Desktop", desktop_stage, 20, 300),

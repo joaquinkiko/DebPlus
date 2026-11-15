@@ -1,23 +1,25 @@
-# menu|section|package|label|requires. menu is hardware or software.
+# menu|section|package|label|requires|bake. menu is hardware or software.
+# bake is optional. "bake" ships the package and its dependencies in the ISO's local repo so it
+# can be installed offline. Rows without it need internet.
 # Rows with the same section are grouped under one header, in file order.
 
 # Hardware
 hardware|Graphics|mesa-vulkan-drivers libgl1-mesa-dri|Mesa (Vulkan and OpenGL)|-
-hardware|Graphics|firmware-amd-graphics mesa-va-drivers|AMD GPU firmware|non-free-firmware
-hardware|Graphics|firmware-intel-graphics intel-media-va-driver|Intel GPU firmware|non-free-firmware
+hardware|Graphics|firmware-amd-graphics mesa-va-drivers|AMD GPU firmware|non-free-firmware|bake
+hardware|Graphics|firmware-intel-graphics intel-media-va-driver|Intel GPU firmware|non-free-firmware|bake
 hardware|Graphics|firmware-nvidia-graphics nvidia-detect nvidia-driver|NVIDIA driver|non-free-firmware,non-free
 hardware|Graphics|nvidia-settings|NVIDIA settings panel|nvidia-driver
 
-hardware|CPU|intel-microcode|Intel CPU microcode|non-free-firmware
-hardware|CPU|amd64-microcode|AMD CPU microcode|non-free-firmware
+hardware|CPU|intel-microcode|Intel CPU microcode|non-free-firmware|bake
+hardware|CPU|amd64-microcode|AMD CPU microcode|non-free-firmware|bake
 
-hardware|Audio|sof-firmware|Intel audio firmware (SOF)|non-free-firmware
+hardware|Audio|firmware-sof-signed|Intel audio firmware (SOF)|non-free-firmware|bake
 
 hardware|Power|tlp|TLP power management (laptops)|-
 hardware|Power|thermald|Intel thermal daemon|-
 
 hardware|Bluetooth|bluez|Bluetooth|-
-hardware|Bluetooth|firmware-realtek firmware-atheros firmware-mediatek|Bluetooth firmware|non-free-firmware
+hardware|Bluetooth|firmware-realtek firmware-atheros firmware-mediatek|Bluetooth firmware|non-free-firmware|bake
 
 hardware|Printing|cups cups-filters cups-browsed avahi-daemon|Printing service (CUPS)|-
 hardware|Printing|printer-driver-gutenprint hplip printer-driver-escpr printer-driver-brlaser printer-driver-splix|Printer drivers|cups
@@ -26,9 +28,9 @@ hardware|Scanning|sane-utils|Scanner support|-
 
 hardware|Sensors|lm-sensors|Hardware sensors|-
 
-hardware|Wi-Fi|firmware-iwlwifi firmware-realtek firmware-atheros firmware-brcm80211 firmware-mediatek|Wi-Fi firmware|non-free-firmware
+hardware|Wi-Fi|firmware-iwlwifi firmware-realtek firmware-atheros firmware-brcm80211 firmware-mediatek|Wi-Fi firmware|non-free-firmware|bake
 
-hardware|Firmware|firmware-misc-nonfree|Misc hardware firmware|non-free-firmware
+hardware|Firmware|firmware-misc-nonfree|Misc hardware firmware|non-free-firmware|bake
 
 # Software
 software|Browsers|firefox-esr|Firefox ESR|-

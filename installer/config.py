@@ -36,11 +36,22 @@ class Config:
 	snapper: bool = False  # btrfs only
 	auto_updates: bool = True  # daily security upgrades via unattended-upgrades
 	manual: bool = False
+	online: bool = True  # False when there is no internet. Set through set_online()
 	layout: dict = field(default_factory=dict)  # role -> {"device", "format"}
 	zram: bool = True  # compressed swap in RAM, from systemd-zram-generator
 	swap_partition: bool = True  # automatic mode only; manual uses the layout
 	swappiness: int = 60
 	
+	def set_online(self, online: bool):
+		"""Record connectivity. Going offline drops the choices that need the network."""
+		self.online = online
+		if online:
+			return
+		if self.desktop not in ("", "console"):
+			self.desktop = ""
+		self.custom_repo = ""
+		self.backports_repo = self.backports_kernel = self.backports_mesa = False
+
 	def has_swap_partition(self) -> bool:
 		if self.manual:
 			return "swap" in self.layout

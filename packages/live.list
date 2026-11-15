@@ -4,7 +4,7 @@ live-boot
 systemd-sysv
 network-manager
 python3-urwid
-debootstrap
+squashfs-tools
 parted
 dosfstools
 e2fsprogs

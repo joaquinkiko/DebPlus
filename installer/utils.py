@@ -8,6 +8,7 @@ import subprocess
 import time
 import shutil
 import json
+import functools
 from urllib.parse import urlparse
 from dataclasses import dataclass
 
@@ -19,17 +20,20 @@ CONSOLE_ROW = ("console", "Console only", "-", "No desktop, text console only")
 WMS_PATH = os.path.join(OPTIONS_DIR, "wms.list")
 EXTRAS_PATH = os.path.join(OPTIONS_DIR, "extras.list")
 COMPONENTS_PATH = os.path.join(OPTIONS_DIR, "components.list")
-TARGET_PACKAGES_PATH = os.path.join(ROOT_DIR, "packages", "target.list")
 FIRMWARE_PATH = os.path.join(ROOT_DIR, "packages", "firmware.list")
 CUSTOM_PATH = os.path.join(OPTIONS_DIR, "custom.list")
 CUSTOM_DIR = os.path.join(OPTIONS_DIR, "custom")
+BOOT_PATH = os.path.join(ROOT_DIR, "packages", "boot.list")
+# Outside live/ on purpose: live-boot layers every *.squashfs it finds in live/.
+TARGET_IMAGE = "/run/live/medium/install/target.squashfs"
+TARGET_REPO = "/run/live/medium/install/repo"  # flat apt repo of the optional packages
 REPO_SCHEMES = ("https", "http", "git")
 
 MIN_RAM_MIB = 1024
 WARN_RAM_MIB = 2048
 MIN_DISK_GIB = 10
 WARN_DISK_GIB = 20
-REQUIRED_TOOLS = ("debootstrap", "parted", "wipefs", "partprobe", "blkid",
+REQUIRED_TOOLS = ("unsquashfs", "parted", "wipefs", "partprobe", "blkid",
                   "lsblk", "chroot", "mkfs.fat", "mkfs.ext4", "mkfs.btrfs",
                   "mkfs.xfs", "mokutil", "timedatectl")
 ESP_RESERVE_GIB = 1
@@ -173,8 +177,9 @@ def _query(argv):
 def _check_network(online):
 	if online:
 		return Check("ok", "Internet", "connected")
-	return Check("block", "Internet",
-	             "Debian is downloaded during install. Connect to Wi-Fi or Ethernet first.",
+	return Check("warn", "Internet",
+	             "No connection. You can still install a console-only system from this "
+	             "image. Desktops, extra apps and updates need a connection.",
 	             "network")
 
 
@@ -231,10 +236,39 @@ def enable_ntp():
 	run(["timedatectl", "set-ntp", "true"])
 
 
+def target_image():
+	"""Path of the base system squashfs on the live medium, or None."""
+	return TARGET_IMAGE if os.path.isfile(TARGET_IMAGE) else None
+
+
+def target_repo():
+	"""Path of the local package repo on the live medium, or None."""
+	return TARGET_REPO if os.path.isfile(os.path.join(TARGET_REPO, "Packages.gz")) else None
+
+
+def boot_packages(mode):
+	"""Bootloader packages for a boot mode ("uefi" or "bios")."""
+	for row_mode, packages in _rows(BOOT_PATH):
+		if row_mode == mode:
+			return packages.split()
+	return []
+
+
+def _check_image():
+	if target_image() and target_repo():
+		return Check("ok", "Install image", "found")
+	return Check("block", "Install image",
+	             "The base system image or package repo is missing from the install "
+	             "medium. Download the ISO again.")
+
+
 def preflight(config, online):
 	"""List of Check objects. Only level "block" stops Install."""
-	checks = [_check_network(online), _check_memory(),
-	          _check_secure_boot(), _check_clock()]
+	checks = [_check_network(online), _check_memory(), _check_secure_boot()]
+	if online:  # an unsynced clock only matters for downloads
+		checks.append(_check_clock())
+	if not config.fake_mode:
+		checks.append(_check_image())
 	if config.disk:
 		checks.append(_check_disk(config.disk))
 	return [check for check in checks if check]
@@ -317,8 +351,21 @@ def wm_rows():
 
 
 def extras_rows():
-	"""(menu, section, package, label) per optional package."""
-	return _rows(EXTRAS_PATH)
+	"""(menu, section, package, label, requires) per optional package."""
+	return [row[:5] for row in _rows(EXTRAS_PATH)]
+
+
+@functools.lru_cache(maxsize=None)
+def baked_packages():
+	"""Package names shipped in the ISO's local repo: extras.list rows flagged 'bake'."""
+	return {word for row in _rows(EXTRAS_PATH)
+	        if len(row) > 5 and row[5] == "bake" for word in row[2].split()}
+
+
+def needs_network(package):
+	"""True unless every package in this entry is already in the install image."""
+	baked = baked_packages()
+	return not all(word in baked for word in package.split())
 
 
 def components_rows():

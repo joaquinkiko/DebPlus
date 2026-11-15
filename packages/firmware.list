@@ -1,2 +1,3 @@
-# Require non-free-firmware in apt sources. Installed only when that component is ticked.
+# Installed when the non-free-firmware component is ticked. One package per line.
+# Shipped in the ISO's local repo, so it also works offline.
 

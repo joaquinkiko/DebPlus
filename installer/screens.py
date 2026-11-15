@@ -46,7 +46,7 @@ def _on_swappiness(_edit, new_text, app):
 
 def _on_multiarch(_box, state, app):
 	app.config.multiarch_i386 = state
-	_drop_unavailable(app.config)
+	drop_unavailable(app.config)
 
 
 def _requirements_met(config, requirement):
@@ -105,7 +105,7 @@ def _on_flag(_box, state, user_data):
 # ── Network ────────────────────────────────────────────────────────────
 
 def network(app):
-	app.online = utils.is_online()
+	app.refresh_online()
 	items = [
 		urwid.Text(("success", "  Connected") if app.online else ("error", "  Offline")),
 		urwid.Divider(),
@@ -292,7 +292,7 @@ def _pick_timezone(app, zone):
 
 
 def timezone(app):
-	app.online = utils.is_online()
+	app.refresh_online()
 	all_zones = utils.get_timezones()
 	results = urwid.SimpleFocusListWalker([])
 	edit = urwid.Edit("  > ")
@@ -668,7 +668,13 @@ def user(app):
 
 # ── Desktop and window managers ────────────────────────────────────────
 
-def _choice_rows(app, choice_id, label, detail, description):
+def _choice_rows(app, choice_id, label, detail, description, enabled=True):
+	if not enabled:
+		return [
+			urwid.Text(("unset", f"  {label:<14}{detail}  needs internet")),
+			urwid.Text(("unset", f"      {description}")),
+			urwid.Divider(),
+		]
 	return [
 		_action(f"  {label:<14}{detail}",
 		        lambda _, v=choice_id: _set(app, "desktop", v)),
@@ -707,20 +713,27 @@ def _custom_repo(app):
 
 
 def desktop(app):
+	app.refresh_online()
 	items = []
+	if not app.online:
+		items += [
+			urwid.Text(("warning", "  Offline: only Console only can be installed. Connect for desktops.")),
+			urwid.Divider(),
+		]
 	for desktop_id, label, package, description in utils.desktop_rows():
 		items += _choice_rows(app, desktop_id, label, package, description)
 	wm_items = []
 	for wm_id, label, repo, _ref, description in utils.wm_rows():
-		wm_items += _choice_rows(app, wm_id, label, "", description)
+		wm_items += _choice_rows(app, wm_id, label, "", description, enabled=app.online)
 	if wm_items:
 		items += wm_items
+	if app.online:
+		items.append(_action("  Custom Repo", lambda _: _custom_repo(app)))
+	else:
+		items.append(urwid.Text(("unset", "  Custom Repo  needs internet")))
 	items += [
-		_action("  Custom Repo", lambda _: _custom_repo(app)),
 		urwid.Text(("label", "      Any git repo with an install.sh at its root.")),
 		urwid.Divider(),
-	]
-	items += [
 		urwid.Text(("label", "  Default GUI environment.")),
 		urwid.Divider(),
 		_back_button(app),
@@ -750,28 +763,31 @@ def packages_menu(app):
 
 # ── Hardware and Software (optional packages) ──────────────────────────
 
-def _drop_unavailable(config):
+def drop_unavailable(config):
 	"""Remove selected packages whose requirements are no longer met."""
 	requirements = utils.package_requirements()
 	for attribute in ("hardware_packages", "software_packages"):
 		chosen = getattr(config, attribute)
 		chosen[:] = [package for package in chosen
-		             if _requirements_met(config, requirements.get(package, "-"))]
+		             if _requirements_met(config, requirements.get(package, "-"))
+		             and (config.online or not utils.needs_network(package))]
 
 
 def _on_archive_toggle(box, state, user_data):
 	_on_toggle(box, state, user_data)
 	if not state:
-		_drop_unavailable(user_data[0].config)
+		drop_unavailable(user_data[0].config)
 
 
 def _on_package_toggle(box, state, user_data):
 	_on_toggle(box, state, user_data)
-	_drop_unavailable(user_data[0].config)
+	drop_unavailable(user_data[0].config)
 
 
 def _package_row(app, menu, package, label, requirement):
 	chosen = getattr(app.config, f"{menu}_packages")
+	if not app.online and utils.needs_network(package):
+		return urwid.Text(("unset", f"  {label}  needs internet"))
 	if _requirements_met(app.config, requirement):
 		return urwid.CheckBox(
 			f"  {label}", state=package in chosen,
@@ -781,7 +797,7 @@ def _package_row(app, menu, package, label, requirement):
 
 
 def _extras_screen(app, menu, title):
-	chosen = getattr(app.config, f"{menu}_packages")
+	app.refresh_online()
 	entries = [(section, package, label, requirement)
 		for row_menu, section, package, label, requirement in utils.extras_rows()
 		if row_menu == menu]
@@ -798,7 +814,8 @@ def _extras_screen(app, menu, title):
 			items.append(_package_row(app, menu, package, label, requirement))
 	items += [
 		urwid.Divider(),
-		urwid.Text(("label", "  Optional. Installed after the desktop.")),
+		urwid.Text(("label", "  Optional. Installed after the desktop." if app.online
+			                     else "  Offline: only packages bundled on this ISO can be installed.")),
 		urwid.Divider(),
 		_back_button(app),
 	]
@@ -824,6 +841,7 @@ def _on_backports_repo(_box, state, app):
 
 
 def advanced(app):
+	app.refresh_online()
 	config = app.config
 	items = [
 		urwid.CheckBox("  zram (compressed swap in RAM)", state=config.zram,
@@ -839,13 +857,21 @@ def advanced(app):
 		               user_data=app),
 		urwid.Text(("label", "      Adds the i386 architecture for 32-bit libraries and apps.")),
 		urwid.Divider(),
-		urwid.CheckBox("  Backports repository", state=config.backports_repo,
-		               on_state_change=_on_backports_repo,
-		               user_data=app),
-		urwid.Text(("label", "      trixie-backports, pinned so nothing upgrades unless requested.")),
-		urwid.Divider(),
 	]
-	if config.backports_repo:
+	if not app.online:
+		items += [
+			urwid.Text(("unset", "  Backports repository, kernel and Mesa need internet.")),
+			urwid.Divider(),
+		]
+	else:
+		items += [
+			urwid.CheckBox("  Backports repository", state=config.backports_repo,
+			               on_state_change=_on_backports_repo,
+			               user_data=app),
+			urwid.Text(("label", "      trixie-backports, pinned so nothing upgrades unless requested.")),
+			urwid.Divider(),
+		]
+	if app.online and config.backports_repo:
 		items += [
 			urwid.CheckBox("  Backports kernel", state=config.backports_kernel,
 			               on_state_change=_on_flag,
@@ -858,7 +884,7 @@ def advanced(app):
 			urwid.Text(("label", "      Newer Mesa drivers from trixie-backports, kept updated.")),
 			urwid.Divider(),
 		]
-	else:
+	elif app.online:
 		items += [
 			urwid.Text(("unset", "  Backports kernel and Mesa require the backports repository.")),
 			urwid.Divider(),
@@ -878,9 +904,14 @@ def advanced(app):
 # ── Summary / install ──────────────────────────────────────────────────
 
 def summary(app):
+	app.refresh_online()  # connectivity may have changed since the choices were made
 	config = app.config
+	if not config.ready():
+		app.show_main()
+		return
 	rows = [
 		("Boot mode",  config.boot_mode.upper()),
+		("Install mode", "online" if config.online else "offline (console only)"),
 		("Disk",       config.disk),
 		("Filesystem", config.filesystem),
 		("Keyboard",   config.keymap),

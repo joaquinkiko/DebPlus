@@ -1,0 +1,4 @@
+# mode|packages. Shipped in the ISO's local repo, installed for that boot mode only.
+# The two modes are downloaded separately because grub-pc conflicts with the UEFI stack.
+uefi|shim-signed grub-efi-amd64-signed efibootmgr
+bios|grub-pc

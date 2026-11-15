@@ -66,7 +66,8 @@ class App:
 		self._in_main = True
 		self._menu_focus = 0
 		self._active_step = None
-		self.online = utils.is_online()
+		self.online = False
+		self.refresh_online()
 		self._in_splash = False
 
 		self.frame = urwid.Frame(
@@ -90,6 +91,13 @@ class App:
 	def run(self):
 		self.loop.run()
 		return self.install_requested
+
+	def refresh_online(self):
+		"""Re-check connectivity and drop any selection that needs the network."""
+		self.online = utils.is_online()
+		self.config.set_online(self.online)
+		screens.drop_unavailable(self.config)
+		return self.online
 
 	def _filter_input(self, keys, raw):
 		"""Map Tab and Shift+Tab to Down and Up."""
