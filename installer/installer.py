@@ -464,6 +464,20 @@ def install_packages(config: Config):
 	_run(f"chroot {MNT} apt-get clean")
 
 
+def build_dkms_modules():
+	"""DKMS postinst builds for the running (live) kernel, not the one just installed."""
+	if not os.path.exists(f"{MNT}/usr/sbin/dkms"):
+		return
+	msg("Building kernel modules (DKMS)...")
+	modules_dir = f"{MNT}/lib/modules"
+	for version in sorted(os.listdir(modules_dir)) if os.path.isdir(modules_dir) else []:
+		if not os.path.isdir(f"{MNT}/usr/src/linux-headers-{version}"):
+			continue
+		result = subprocess.run(f"chroot {MNT} dkms autoinstall -k {shlex.quote(version)}", shell=True)
+		if result.returncode != 0:
+			print(f"  {RED}DKMS build failed for {version}. Fix it from Shell: dkms autoinstall -k {version}{NC}")
+
+
 def install_base(config: Config):
 	image = utils.target_image()
 	if not image:
@@ -480,6 +494,7 @@ def install_base(config: Config):
 	if config.multiarch_i386:
 		_run(f"chroot {MNT} dpkg --add-architecture i386")
 	install_packages(config)
+	build_dkms_modules()
 	ok("Base system installed")
 
 

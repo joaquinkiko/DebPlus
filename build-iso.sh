@@ -223,13 +223,13 @@ cat > /etc/apt/sources.list.d/debian.sources << SOURCES
 Types: deb
 URIs: $MIRROR
 Suites: $SUITE $SUITE-updates
-Components: main non-free-firmware
+Components: main non-free-firmware non-free
 Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
 
 Types: deb
 URIs: http://security.debian.org/debian-security
 Suites: $SUITE-security
-Components: main non-free-firmware
+Components: main non-free-firmware non-free
 Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
 SOURCES
 : > /etc/apt/sources.list
