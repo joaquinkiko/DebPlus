@@ -262,6 +262,13 @@ def _cryptsetup(args, passphrase=None):
 		die(f"cryptsetup {args[0]} failed: {result.stderr.strip()}")
 
 
+def _close_mappers():
+	"""Release LUKS mappers left open by an earlier attempt."""
+	_try(f"swapoff /dev/mapper/{LUKS_SWAP}")
+	_try(f"cryptsetup close {LUKS_SWAP}")
+	_try(f"cryptsetup close {LUKS_ROOT}")
+
+
 def _encrypt_layout(config: Config):
 	msg("Encrypting...")
 	root = config.layout["root"]["device"]
@@ -281,6 +288,8 @@ def _encrypt_layout(config: Config):
 
 
 def partition_disk(config: Config):
+	_try(f"umount -Rl {MNT}")
+	_close_mappers()
 	if config.manual:
 		msg("Using selected partitions...")
 	else:
@@ -512,13 +521,15 @@ def configure_encryption(config: Config):
 		os.makedirs(f"{MNT}/etc/luks", exist_ok=True)
 		shutil.copy2(SWAP_KEY_LIVE, f"{MNT}/etc/luks/swap.key")
 		os.chmod(f"{MNT}/etc/luks/swap.key", 0o600)
-		os.remove(SWAP_KEY_LIVE)
 		lines.append(f"{LUKS_SWAP} UUID={_uuid(config.layout['swap']['device'])} "
 		             f"/etc/luks/swap.key luks")
 	with open(f"{MNT}/etc/crypttab", "w") as crypttab_file:
 		crypttab_file.write("\n".join(lines) + "\n")
-	with open(f"{MNT}/etc/default/grub", "a") as grub_file:
-		grub_file.write("GRUB_ENABLE_CRYPTODISK=y\n")
+	with open(f"{MNT}/etc/default/grub") as grub_file:
+		grub_text = grub_file.read()
+	if "GRUB_ENABLE_CRYPTODISK=y" not in grub_text:
+		with open(f"{MNT}/etc/default/grub", "a") as grub_file:
+			grub_file.write("GRUB_ENABLE_CRYPTODISK=y\n")
 	ok("Encryption configured")
 
 
@@ -608,8 +619,11 @@ def copy_wifi_profiles():
 def create_users(config: Config):
 	msg("Creating users...")
 	_run(f"chroot {MNT} groupadd -f lpadmin")
-	_run(f"chroot {MNT} useradd -m -G sudo,audio,video,netdev,lpadmin "
-	     f"-s /bin/bash {config.username}")
+	user_known = subprocess.run(["chroot", MNT, "id", config.username],
+	                            capture_output=True).returncode == 0
+	if not user_known:
+		_run(f"chroot {MNT} useradd -m -G sudo,audio,video,netdev,lpadmin "
+		     f"-s /bin/bash {config.username}")
 	subprocess.run(["chroot", MNT, "chpasswd"],
 	               input=f"{config.username}:{config.user_pass}\n",
 	               text=True, check=True)
@@ -739,6 +753,7 @@ def cleanup():
 	if os.path.isdir(f"{MNT}/var/log"):
 		_try(f"cp {LOG_PATH} {MNT}/var/log/debplus-install.log")
 	_try(f"umount -Rl {MNT}")
+	_try(f"rm -f {SWAP_KEY_LIVE}")
 	ok("Done")
 
 
