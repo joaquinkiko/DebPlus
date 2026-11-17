@@ -147,6 +147,9 @@ class App:
 			("Advanced",     _chosen_label(config.advanced_labels()),
 			                 lambda: screens.advanced(self)),
 		]
+		if config.needs_mok():
+			steps.insert(-1, ("Secure Boot", "set" if config.mok_pass else "",
+			                  lambda: screens.secure_boot(self)))
 		if self.preflight_issues():
 			steps.insert(0, ("Pre-flight", "", lambda: screens.preflight(self)))
 		return steps

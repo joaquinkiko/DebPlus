@@ -392,6 +392,8 @@ def packages_to_install(config: Config) -> list:
 	"""Packages beyond the base image: bootloader, chosen options, shipped extras."""
 	wanted = set(utils.boot_packages(config.boot_mode))
 	wanted |= {package for package, flag in utils.optional_rows() if getattr(config, flag)}
+	if not config.backports_kernel:  # backports path installs matching headers below
+		wanted |= set(utils.header_packages())
 	for entry in config.hardware_packages + config.software_packages:
 		if not utils.needs_network(entry):  # shipped on the ISO. The rest go through install_extras
 			wanted |= set(entry.split())
@@ -464,20 +466,6 @@ def install_packages(config: Config):
 	_run(f"chroot {MNT} apt-get clean")
 
 
-def build_dkms_modules():
-	"""DKMS postinst builds for the running (live) kernel, not the one just installed."""
-	if not os.path.exists(f"{MNT}/usr/sbin/dkms"):
-		return
-	msg("Building kernel modules (DKMS)...")
-	modules_dir = f"{MNT}/lib/modules"
-	for version in sorted(os.listdir(modules_dir)) if os.path.isdir(modules_dir) else []:
-		if not os.path.isdir(f"{MNT}/usr/src/linux-headers-{version}"):
-			continue
-		result = subprocess.run(f"chroot {MNT} dkms autoinstall -k {shlex.quote(version)}", shell=True)
-		if result.returncode != 0:
-			print(f"  {RED}DKMS build failed for {version}. Fix it from Shell: dkms autoinstall -k {version}{NC}")
-
-
 def install_base(config: Config):
 	image = utils.target_image()
 	if not image:
@@ -494,7 +482,6 @@ def install_base(config: Config):
 	if config.multiarch_i386:
 		_run(f"chroot {MNT} dpkg --add-architecture i386")
 	install_packages(config)
-	build_dkms_modules()
 	ok("Base system installed")
 
 
@@ -741,6 +728,33 @@ def install_bootloader(config: Config):
 	ok("Bootloader installed")
 
 
+def configure_secure_boot(config: Config):
+	if not config.needs_mok():
+		return
+	msg("Setting up Secure Boot signing...")
+	key_dir = f"{MNT}/var/lib/dkms"
+	os.makedirs(key_dir, exist_ok=True)
+	_run(f"chroot {MNT} openssl req -new -x509 -newkey rsa:2048 -nodes -days 36500 "
+	     f"-subj '/CN=DebPlus Secure Boot/' -keyout /var/lib/dkms/mok.key "
+	     f"-out /var/lib/dkms/mok.pub")
+	os.chmod(f"{key_dir}/mok.key", 0o600)
+	_run(f"chroot {MNT} openssl x509 -outform DER -in /var/lib/dkms/mok.pub "
+	     f"-out /var/lib/dkms/mok.der")
+	with open(f"{MNT}/etc/dkms/framework.conf", "a") as conf_file:
+		conf_file.write("mok_signing_key=/var/lib/dkms/mok.key\n"
+		                "mok_certificate=/var/lib/dkms/mok.pub\n")
+	modules_dir = f"{MNT}/lib/modules"
+	for version in sorted(os.listdir(modules_dir)) if os.path.isdir(modules_dir) else []:
+		if os.path.isdir(f"{MNT}/usr/src/linux-headers-{version}"):
+			_run(f"chroot {MNT} dkms autoinstall -k {shlex.quote(version)}")
+	result = subprocess.run(["mokutil", "--import", f"{key_dir}/mok.der"],
+	                        input=f"{config.mok_pass}\n{config.mok_pass}\n",
+	                        text=True, capture_output=True)
+	if result.returncode != 0:
+		die(f"mokutil import failed: {result.stderr.strip()}")
+	ok("Key queued. On first boot choose Enroll MOK and enter the password.")
+
+
 # ── Cleanup and orchestration ─────────────────────────────────────────
 
 def cleanup():
@@ -818,11 +832,12 @@ def run_install(config: Config):
 
 	stages = [
 		("Partitioning", lambda: partition_disk(config), 5, 20),
-		("Base system", lambda: install_base(config), 40, 300),
+		("Base system", lambda: install_base(config), 36, 300),
 		("Configuration", lambda: configure_system(config), 10, 120),
 		("Users", lambda: create_users(config), 2, 10),
 		("Desktop", desktop_stage, 20, 300),
 		("Extras", extras_stage, 15, 150),
+		("Secure Boot", lambda: configure_secure_boot(config), 4, 30),
 		("Bootloader", lambda: install_bootloader(config), 8, 60),
 	]
 	try:

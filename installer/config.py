@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from .utils import ESP_RESERVE_GIB, MIN_DISK_GIB
+from .utils import ESP_RESERVE_GIB, MIN_DISK_GIB, dkms_packages
 
 # Fields that must be set before Install unlocks. Everything else is optional.
 REQUIRED_FIELDS = (
@@ -41,6 +41,8 @@ class Config:
 	zram: bool = True  # compressed swap in RAM, from systemd-zram-generator
 	swap_partition: bool = True  # automatic mode only; manual uses the layout
 	swappiness: int = 60
+	secure_boot: bool = False  # set at startup from mokutil
+	mok_pass: str = field(default="", repr=False)  # one-time MOK enrollment password
 	
 	def set_online(self, online: bool):
 		"""Record connectivity. Going offline drops the choices that need the network."""
@@ -72,10 +74,17 @@ class Config:
 		missing = sum(1 for name in REQUIRED_FIELDS if not getattr(self, name))
 		missing += 0 if self.layout_ready() else 1
 		missing += 1 if self.luks and not self.luks_pass else 0
+		missing += 1 if self.needs_mok() and not self.mok_pass else 0
 		return missing
 
 	def ready(self) -> bool:
 		return self.missing_count() == 0
+
+	def needs_mok(self) -> bool:
+		"""Secure Boot is on and a selected package builds DKMS modules."""
+		selected = self.hardware_packages + self.software_packages
+		words = {word for entry in selected for word in entry.split()}
+		return self.secure_boot and bool(words & dkms_packages())
 
 	def advanced_labels(self) -> list:
 		labels = []

@@ -14,7 +14,8 @@ def main():
 	if missing and not fake_mode:
 		sys.exit("This installer image is incomplete. Download it again.\n"
 		         f"Missing tools: {', '.join(missing)}")
-	config = Config(boot_mode=utils.detect_boot_mode(), fake_mode=fake_mode)
+	config = Config(boot_mode=utils.detect_boot_mode(), fake_mode=fake_mode,
+	                secure_boot=utils.secure_boot_enabled())
 	if App(config).run() and not config.fake_mode:
 		installer.run_install(config)
 

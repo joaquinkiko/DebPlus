@@ -22,6 +22,8 @@ EXTRAS_PATH = os.path.join(OPTIONS_DIR, "extras.list")
 COMPONENTS_PATH = os.path.join(OPTIONS_DIR, "components.list")
 OPTIONAL_PATH = os.path.join(ROOT_DIR, "packages", "optional.list")
 MESA_PATH = os.path.join(ROOT_DIR, "packages", "mesa.list")
+HEADERS_PATH = os.path.join(ROOT_DIR, "packages", "headers.list")
+DKMS_PATH = os.path.join(ROOT_DIR, "packages", "dkms.list")
 CUSTOM_PATH = os.path.join(OPTIONS_DIR, "custom.list")
 CUSTOM_DIR = os.path.join(OPTIONS_DIR, "custom")
 BOOT_PATH = os.path.join(ROOT_DIR, "packages", "boot.list")
@@ -284,6 +286,20 @@ def optional_rows():
 def mesa_packages():
 	"""Mesa packages installed from trixie-backports."""
 	return read_lines(MESA_PATH)
+
+
+def header_packages():
+	"""Kernel header packages every install needs for DKMS."""
+	return read_lines(HEADERS_PATH)
+
+
+def dkms_packages():
+	"""Packages that build modules with DKMS. Signed when Secure Boot is on."""
+	return set(read_lines(DKMS_PATH))
+
+
+def secure_boot_enabled():
+	return "enabled" in _query(["mokutil", "--sb-state"]).lower()
 
 
 def custom_rows():

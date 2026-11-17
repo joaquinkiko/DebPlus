@@ -842,6 +842,42 @@ def software(app):
 	_extras_screen(app, "software", "Software")
 
 
+# ── Secure Boot ────────────────────────────────────────────────────────
+
+def secure_boot(app):
+	passphrase = SubmitEdit("  Password: ", mask="*")
+	confirm = SubmitEdit("  Confirm:  ", mask="*")
+	error_text = urwid.Text("")
+
+	def accept(_=None):
+		if not 8 <= len(passphrase.edit_text) <= 16:
+			error_text.set_text(("error", "  Use 8 to 16 characters"))
+		elif passphrase.edit_text != confirm.edit_text:
+			error_text.set_text(("error", "  Passwords don't match"))
+		else:
+			app.config.mok_pass = passphrase.edit_text
+			app.show_main()
+
+	urwid.connect_signal(passphrase, "activate",
+	                     lambda _: listbox.set_focus(listbox.body.index(confirm)))
+	urwid.connect_signal(confirm, "activate", accept)
+	items = [
+		urwid.Text(("label", "  Secure Boot is on, so DKMS drivers must be signed.")),
+		urwid.Text(("label", "  Set a one-time password. On first boot a blue MOK screen")),
+		urwid.Text(("label", "  appears: choose Enroll MOK and enter this password.")),
+		urwid.Divider(),
+		passphrase,
+		confirm,
+		error_text,
+		urwid.Divider(),
+		_action(("bold", "  Accept"), accept),
+		urwid.Divider(),
+		_back_button(app),
+	]
+	listbox = _screen("Secure Boot", items)
+	app.show_screen(listbox)
+
+
 # ── Advanced ───────────────────────────────────────────────────────────
 def _on_backports_repo(_box, state, app):
 	app.config.backports_repo = state
