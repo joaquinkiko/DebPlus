@@ -197,7 +197,7 @@ boot_set() {
 word_list() { tr -s ' ' '\n' | sed '/^$/d' | sort -u; }
 
 msg "Debootstrapping base system image..."
-debootstrap --arch=amd64 --variant=minbase --components=main,non-free-firmware \
+debootstrap --arch=amd64 --variant=minbase --components=main,contrib,non-free-firmware \
 	--keyring="$KEYRING" "$SUITE" "$TARGET_DIR" "$MIRROR"
 
 mount --bind /dev "$TARGET_DIR/dev"
@@ -228,13 +228,13 @@ cat > /etc/apt/sources.list.d/debian.sources << SOURCES
 Types: deb
 URIs: $MIRROR
 Suites: $SUITE $SUITE-updates
-Components: main non-free-firmware non-free
+Components: main contrib non-free-firmware non-free
 Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
 
 Types: deb
 URIs: http://security.debian.org/debian-security
 Suites: $SUITE-security
-Components: main non-free-firmware non-free
+Components: main contrib non-free-firmware non-free
 Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
 SOURCES
 : > /etc/apt/sources.list

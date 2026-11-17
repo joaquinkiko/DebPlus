@@ -7,8 +7,8 @@
 hardware|Graphics|mesa-vulkan-drivers libgl1-mesa-dri|Mesa (Vulkan and OpenGL)|-
 hardware|Graphics|firmware-amd-graphics mesa-va-drivers|AMD GPU firmware|non-free-firmware|bake
 hardware|Graphics|firmware-intel-graphics intel-media-va-driver|Intel GPU firmware|non-free-firmware|bake
-hardware|Graphics|firmware-nvidia-graphics nvidia-detect nvidia-driver nvidia-kernel-dkms linux-headers-amd64|NVIDIA driver|non-free-firmware,non-free|bake
-hardware|Graphics|nvidia-settings|NVIDIA settings panel|nvidia-driver|bake
+hardware|Graphics|firmware-nvidia-graphics nvidia-detect nvidia-driver nvidia-kernel-dkms linux-headers-amd64|NVIDIA driver|contrib,non-free-firmware,non-free|bake
+hardware|Graphics|nvidia-settings|NVIDIA settings panel|contrib,nvidia-driver|bake
 hardware|Graphics|switcheroo-control|Hybrid graphics switching (laptops)|-|bake
 
 hardware|CPU|intel-microcode|Intel CPU microcode|non-free-firmware|bake
