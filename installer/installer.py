@@ -13,8 +13,7 @@ import shlex
 
 from . import utils
 from .config import Config
-from .utils import (FIRMWARE_PATH, MNT, PROFILE,
-                    get_partitions, keyboard_config, read_lines)
+from .utils import MNT, PROFILE, get_partitions, keyboard_config
 
 BOLD = "\033[1m"
 RED = "\033[0;31m"
@@ -401,8 +400,6 @@ def packages_to_install(config: Config) -> list:
 	"""Packages beyond the base image: bootloader, chosen options, shipped extras."""
 	wanted = set(utils.boot_packages(config.boot_mode))
 	wanted |= {package for package, flag in OPTIONAL_INSTALL if getattr(config, flag)}
-	if "non-free-firmware" in config.components:
-		wanted |= set(read_lines(FIRMWARE_PATH))
 	for entry in config.hardware_packages + config.software_packages:
 		if not utils.needs_network(entry):  # shipped on the ISO. The rest go through install_extras
 			wanted |= set(entry.split())
