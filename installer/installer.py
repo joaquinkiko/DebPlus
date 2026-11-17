@@ -309,8 +309,10 @@ def _fstab_rows(config: Config):
 	rows = [(root, "/", config.filesystem,
 	         FSTAB_OPTIONS[config.filesystem] + (",subvol=@" if btrfs else ""), 1)]
 	if "home" in layout:
-		rows.append((layout["home"]["device"], "/home", config.filesystem,
-		             FSTAB_OPTIONS[config.filesystem], 2))
+		home_device = layout["home"]["device"]
+		home_type = _fs_type(home_device)
+		rows.append((home_device, "/home", home_type,
+		             FSTAB_OPTIONS.get(home_type, "defaults"), 2))
 	elif btrfs:
 		rows.append((root, "/home", "btrfs",
 		             FSTAB_OPTIONS["btrfs"] + ",subvol=@home", 2))
@@ -511,6 +513,11 @@ def install_base(config: Config):
 
 def _uuid(device):
 	return subprocess.run(["blkid", "-s", "UUID", "-o", "value", device],
+	                      capture_output=True, text=True).stdout.strip()
+
+
+def _fs_type(device):
+	return subprocess.run(["blkid", "-s", "TYPE", "-o", "value", device],
 	                      capture_output=True, text=True).stdout.strip()
 
 

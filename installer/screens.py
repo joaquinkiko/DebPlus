@@ -400,7 +400,7 @@ def disk(app):
 # ── Partitioning ───────────────────────────────────────────────────────
 
 FORMAT_DEFAULT = {"root": True, "home": True, "swap": True,
-                  "esp": False, "bios_grub": False}
+                  "esp": True, "bios_grub": False}
 
 
 def _choose_disk(app, device):
@@ -463,6 +463,12 @@ def _finish_manual(app):
 	if not config.layout_ready():
 		partition_layout(app, "Choose a root partition, and an EFI partition on UEFI.")
 		return
+	home = config.layout.get("home")
+	if home and not home["format"]:
+		filesystems = {device: fs for device, _size, fs in utils.partition_rows(config.disk)}
+		if filesystems.get(home["device"], "unformatted") == "unformatted":
+			partition_layout(app, "Home has no filesystem. Tick Format for it.")
+			return
 	if (config.boot_mode == "bios" and "bios_grub" not in config.layout
 	        and utils.partition_table_type(config.disk) == "gpt"):
 		partition_layout(app, "This disk uses GPT, so it needs a BIOS boot partition.")
@@ -483,7 +489,7 @@ def partition_layout(app, error=""):
 			items.append(_action(f"  {marker} {device:<16}{size:<9}{filesystem}",
 			                     lambda _, r=role, d=device: _assign(app, r, d)))
 		items.append(_action("    None", lambda _, r=role: _assign(app, r, None)))
-		if role != "root" and selected:
+		if role == "home" and selected:
 			items.append(urwid.CheckBox(
 				"    Format (erases this partition)", state=selected["format"],
 				on_state_change=_on_format, user_data=(app, role)))
