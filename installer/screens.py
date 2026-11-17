@@ -36,6 +36,9 @@ FILESYSTEM_CHOICES = [
 ]
 
 LOCALE_RESULT_LIMIT = 40
+RESERVED_USERNAMES = {"root", "daemon", "bin", "sys", "sync", "games", "man", "lp",
+                      "mail", "news", "uucp", "proxy", "www-data", "backup", "list",
+                      "irc", "gnats", "nobody", "messagebus", "sshd", "_apt"}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
@@ -628,8 +631,10 @@ def user(app):
 
 	def accept(_=None):
 		name = username_edit.edit_text
-		if not re.match(r"^[a-z][a-z0-9_-]*$", name):
-			error_text.set_text(("error", "  Invalid username"))
+		if not re.match(r"^[a-z][a-z0-9_-]{0,31}$", name):
+			error_text.set_text(("error", "  Invalid username (1-32 characters)"))
+		elif name in RESERVED_USERNAMES or name.startswith("systemd-"):
+			error_text.set_text(("error", f"  '{name}' is reserved"))
 		elif not pass_edit.edit_text:
 			error_text.set_text(("error", "  Password cannot be empty"))
 		elif pass_edit.edit_text != pass_confirm.edit_text:
