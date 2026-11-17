@@ -4,11 +4,14 @@
 # Rows with the same section are grouped under one header, in file order.
 
 # Hardware
-hardware|Graphics|mesa-vulkan-drivers libgl1-mesa-dri|Mesa (Vulkan and OpenGL)|-
-hardware|Graphics|firmware-amd-graphics mesa-va-drivers|AMD GPU firmware|non-free-firmware|bake
-hardware|Graphics|firmware-intel-graphics intel-media-va-driver|Intel GPU firmware|non-free-firmware|bake
-hardware|Graphics|firmware-nvidia-graphics nvidia-detect nvidia-driver nvidia-kernel-dkms linux-headers-amd64|NVIDIA driver|contrib,non-free-firmware,non-free|bake
+hardware|Graphics|mesa-vulkan-drivers libgl1-mesa-dri|Mesa (Vulkan and OpenGL)|-|bake
+hardware|Graphics|libgl1-mesa-dri:i386 libglx-mesa0:i386 libegl-mesa0:i386 mesa-vulkan-drivers:i386|Mesa 32-bit libraries (Gaming)|i386|bake
+hardware|Graphics|firmware-amd-graphics mesa-va-drivers|AMD GPU firmware and drivers|non-free-firmware|bake
+hardware|Graphics|firmware-intel-graphics intel-media-va-driver|Intel GPU firmware and drivers|non-free-firmware|bake
+hardware|Graphics|firmware-nvidia-graphics nvidia-detect nvidia-driver nvidia-kernel-dkms|NVIDIA driver|contrib,non-free-firmware,non-free|bake
+hardware|Graphics|nvidia-driver-libs:i386|NVIDIA 32-bit libraries (Gaming)|nvidia-driver,i386|bake
 hardware|Graphics|nvidia-settings|NVIDIA settings panel|contrib,nvidia-driver|bake
+hardware|Graphics|nvidia-prime|NVIDIA PRIME (hybrid graphics)|nvidia-driver|bake
 hardware|Graphics|switcheroo-control|Hybrid graphics switching (laptops)|-|bake
 
 hardware|CPU|intel-microcode|Intel CPU microcode|non-free-firmware|bake
@@ -16,11 +19,9 @@ hardware|CPU|amd64-microcode|AMD CPU microcode|non-free-firmware|bake
 
 hardware|Audio|firmware-sof-signed|Intel audio firmware (SOF)|non-free-firmware|bake
 
-hardware|Power|tlp|TLP power management (laptops)|-|bake
 hardware|Power|thermald|Intel thermal daemon|-|bake
 
 hardware|Bluetooth|bluez|Bluetooth|-|bake
-hardware|Bluetooth|firmware-realtek firmware-atheros firmware-mediatek|Bluetooth firmware|non-free-firmware|bake
 
 hardware|Printing|cups cups-filters cups-browsed avahi-daemon|Printing service (CUPS)|-|bake
 hardware|Printing|printer-driver-gutenprint hplip printer-driver-escpr printer-driver-brlaser printer-driver-splix|Printer drivers|cups|bake
@@ -28,10 +29,12 @@ hardware|Printing|printer-driver-gutenprint hplip printer-driver-escpr printer-d
 hardware|Scanning|sane-utils|Scanner support|-|bake
 
 hardware|Sensors|lm-sensors|Hardware sensors|-|bake
+hardware|Sensors|iio-sensor-proxy|Accelerometer and rotation sensors|-|bake
 
 hardware|Wi-Fi|firmware-iwlwifi firmware-realtek firmware-atheros firmware-brcm80211 firmware-mediatek|Wi-Fi firmware|non-free-firmware|bake
 
 hardware|Firmware|firmware-misc-nonfree|Misc hardware firmware|non-free-firmware|bake
+hardware|Firmware|fwupd|Firmware updates (LVFS)|-|bake
 
 # Software
 software|Browsers|firefox-esr|Firefox ESR|-
@@ -86,5 +89,6 @@ software|Utilities|htop|Htop|-
 software|Utilities|btop|Btop|-
 software|Utilities|tmux|Terminal Multiplexer|-
 software|Utilities|wine|Wine (Windows Execution)|-
+software|Utilities|wine32:i386|Wine 32-bit libraries|i386
 software|Utilities|ufw|ufw (Firewall)|-
 software|Utilities|zip unzip|Archive Tools|-
