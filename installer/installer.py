@@ -6,8 +6,9 @@ import os
 import re
 import shutil
 import subprocess
+import select
 import sys
-import threading
+import termios
 import time
 import shlex
 
@@ -39,73 +40,52 @@ LUKS_ROOT = "cryptroot"
 LUKS_SWAP = "cryptswap"
 SWAP_KEY_LIVE = "/run/debplus/swap.key"
 
-PROGRESS_SECONDS_PER_PERCENT = 5
 PROGRESS_BAR_WIDTH = 40
+REBOOT_DELAY_SECONDS = 30
 
 
 class Progress:
-	"""Bar on the terminal's last row. Creeps 1% per interval within a stage, capped at its weight."""
+	"""Steps bar on the terminal's last row. Filled by finished steps, labelled with the current one."""
 
 	def __init__(self):
-		self.lock = threading.Lock()
-		self.stop_event = threading.Event()
-		self.done_percent = 0
-		self.stage_label = ""
-		self.stage_weight = 0
-		self.stage_started = 0.0
-		self.seconds_per_percent = PROGRESS_SECONDS_PER_PERCENT
+		self.total = 0
+		self.done = 0
+		self.label = ""
+		self.active = False
 
-	def start(self):
+	def start(self, total):
+		self.total = total
+		self.active = True
 		rows = shutil.get_terminal_size().lines
 		sys.stdout.write(f"\x1b[1;{rows - 1}r")  # scrolling stops above the bar row
 		sys.stdout.flush()
-		threading.Thread(target=self._refresh_loop, daemon=True).start()
+		self._draw()
 
 	def stop(self):
-		with self.lock:
-			if self.stop_event.is_set():
-				return
-			self.stop_event.set()
-			rows = shutil.get_terminal_size().lines
-			sys.stdout.write(f"\x1b7\x1b[{rows};1H\x1b[2K\x1b[r\x1b8")
-			sys.stdout.flush()
-
-	def start_stage(self, label, weight, expected_seconds):
-		with self.lock:
-			self.stage_label = label
-			self.stage_weight = weight
-			self.seconds_per_percent = expected_seconds / weight
-			self.stage_started = time.monotonic()
-			self._draw()
-
-	def finish_stage(self):
-		with self.lock:
-			self.done_percent += self.stage_weight
-			self.stage_weight = 0
-			self._draw()
-
-
-	def _percent(self):
-		creep = 0
-		if self.stage_weight:
-			elapsed = time.monotonic() - self.stage_started
-			creep = min(self.stage_weight, int(elapsed // self.seconds_per_percent))
-		return self.done_percent + creep
-
-	def _draw(self):
-		percent = self._percent()
-		filled = percent * PROGRESS_BAR_WIDTH // 100
-		bar = "#" * filled + "-" * (PROGRESS_BAR_WIDTH - filled)
+		if not self.active:
+			return
+		self.active = False
 		rows = shutil.get_terminal_size().lines
-		sys.stdout.write(f"\x1b7\x1b[{rows};1H\x1b[2K  [{bar}] {percent:3d}%  "
-		                 f"{self.stage_label}\x1b8")
+		sys.stdout.write(f"\x1b7\x1b[{rows};1H\x1b[2K\x1b[r\x1b8")
 		sys.stdout.flush()
 
-	def _refresh_loop(self):
-		while not self.stop_event.wait(1):
-			with self.lock:
-				if not self.stop_event.is_set():
-					self._draw()
+	def start_stage(self, label):
+		self.label = label
+		self._draw()
+
+	def finish_stage(self):
+		self.done += 1
+		self._draw()
+
+	def _draw(self):
+		if not self.active:
+			return
+		filled = self.done * PROGRESS_BAR_WIDTH // self.total
+		bar = "#" * filled + "-" * (PROGRESS_BAR_WIDTH - filled)
+		step = min(self.done + 1, self.total)
+		rows = shutil.get_terminal_size().lines
+		sys.stdout.write(f"\x1b7\x1b[{rows};1H\x1b[2K  [{bar}]  {self.label} {step}/{self.total}\x1b8")
+		sys.stdout.flush()
 
 
 PROGRESS = Progress()
@@ -792,9 +772,22 @@ def _mark_done(label):
 		state_file.write(label + "\n")
 
 
-def _run_stage(index, total, label, weight, expected_seconds, action):
+def _clear_screen():
+	sys.stdout.write("\x1b[2J\x1b[3J\x1b[H")
+	sys.stdout.flush()
+
+
+def _flush_input():
+	"""Drop keys pressed during the install so they don't trigger the reboot prompt."""
+	try:
+		termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+	except (termios.error, OSError, ValueError):
+		pass
+
+
+def _run_stage(index, total, label, action):
 	msg(f"[{index}/{total}] {label}")
-	PROGRESS.start_stage(label, weight, expected_seconds)
+	PROGRESS.start_stage(label)
 	while True:
 		try:
 			action()
@@ -817,8 +810,7 @@ def _run_stage(index, total, label, weight, expected_seconds, action):
 
 
 def run_install(config: Config):
-	PROGRESS.start()
-	_emit(f"\n  {BOLD}{CYAN}Installing {PROFILE['PROFILE_NAME']}{NC}\n")
+	_clear_screen()
 	_try(f"hostname {config.hostname}")
 	failures = []
 
@@ -831,22 +823,26 @@ def run_install(config: Config):
 		failures.extend(install_custom_software(config))
 
 	stages = [
-		("Partitioning", lambda: partition_disk(config), 5, 20),
-		("Base system", lambda: install_base(config), 36, 300),
-		("Configuration", lambda: configure_system(config), 10, 120),
-		("Users", lambda: create_users(config), 2, 10),
-		("Desktop", desktop_stage, 20, 300),
-		("Extras", extras_stage, 15, 150),
-		("Secure Boot", lambda: configure_secure_boot(config), 4, 30),
-		("Bootloader", lambda: install_bootloader(config), 8, 60),
+		("Partitioning", lambda: partition_disk(config)),
+		("Base system", lambda: install_base(config)),
+		("Configuration", lambda: configure_system(config)),
+		("Users", lambda: create_users(config)),
+		("Desktop", desktop_stage),
+		("Extras", extras_stage),
+		("Secure Boot", lambda: configure_secure_boot(config)),
+		("Bootloader", lambda: install_bootloader(config)),
 	]
+	PROGRESS.start(len(stages))
+	_emit(f"\n  {BOLD}{CYAN}Installing {PROFILE['PROFILE_NAME']}{NC}\n")
 	try:
-		for index, (label, action, weight, expected_seconds) in enumerate(stages, 1):
-			_run_stage(index, len(stages), label, weight, expected_seconds, action)
+		for index, (label, action) in enumerate(stages, 1):
+			_run_stage(index, len(stages), label, action)
 	except KeyboardInterrupt:
 		cleanup()
 		raise
 
+	PROGRESS.stop()
+	_clear_screen()
 	if failures:
 		_emit(f"\n  {RED}{BOLD}Installed with errors:{NC}")
 		for failure in failures:
@@ -862,13 +858,16 @@ def run_install(config: Config):
 		return
 
 	_emit(f"\n  {GREEN}{BOLD}Installation complete!{NC}")
-	_emit("\n  Rebooting in 30 seconds. Remove the installation media if the")
-	_emit("  firmware boots it first. Press Ctrl+C to stay in the live system.")
+	_emit("\n  Remove the installation media if the firmware boots it first.")
+	_emit("  Press Enter to reboot now, or Ctrl+C to stay in the live system.")
+	_emit(f"  Rebooting automatically in {REBOOT_DELAY_SECONDS} seconds.")
+	_flush_input()
 	try:
-		time.sleep(30)
+		ready, _, _ = select.select([sys.stdin], [], [], REBOOT_DELAY_SECONDS)
 	except KeyboardInterrupt:
-		PROGRESS.stop()
 		_emit("\n  Reboot cancelled. Target is still mounted at " + MNT + ".")
 		return
+	if ready:
+		sys.stdin.readline()
 	cleanup()
 	subprocess.run("reboot", shell=True)
