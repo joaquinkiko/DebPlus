@@ -383,12 +383,6 @@ def write_apt_sources(config: Config):
 
 # ── Base system ────────────────────────────────────────────────────────
 
-# Optional packages and the Config flag that installs each
-OPTIONAL_INSTALL = (
-	("cryptsetup", "luks"), ("cryptsetup-initramfs", "luks"),
-	("snapper", "snapper"), ("unattended-upgrades", "auto_updates"),
-	("systemd-zram-generator", "zram"),
-)
 APT = "env DEBIAN_FRONTEND=noninteractive apt-get"
 LOCAL_REPO_MOUNT = "/media/debplus-repo"  # inside the target, only during install
 # Offline apt: read only the local repo. Check-Date off because an offline RTC is often wrong.
@@ -399,7 +393,7 @@ LOCAL_APT = ("-o Dir::Etc::sourcelist=debplus-local.list -o Dir::Etc::sourcepart
 def packages_to_install(config: Config) -> list:
 	"""Packages beyond the base image: bootloader, chosen options, shipped extras."""
 	wanted = set(utils.boot_packages(config.boot_mode))
-	wanted |= {package for package, flag in OPTIONAL_INSTALL if getattr(config, flag)}
+	wanted |= {package for package, flag in utils.optional_rows() if getattr(config, flag)}
 	for entry in config.hardware_packages + config.software_packages:
 		if not utils.needs_network(entry):  # shipped on the ISO. The rest go through install_extras
 			wanted |= set(entry.split())

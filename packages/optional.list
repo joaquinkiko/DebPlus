@@ -1,7 +1,6 @@
-# Optional packages shipped in the ISO's local repo. One per line.
-# Installed only when the matching option is ticked (see OPTIONAL_INSTALL in installer.py).
-cryptsetup
-cryptsetup-initramfs
-snapper
-unattended-upgrades
-systemd-zram-generator
+# package|config flag. Installed when that flag is on. Shipped in the ISO's local repo.
+cryptsetup|luks
+cryptsetup-initramfs|luks
+snapper|snapper
+unattended-upgrades|auto_updates
+systemd-zram-generator|zram

@@ -20,6 +20,7 @@ CONSOLE_ROW = ("console", "Console only", "-", "No desktop, text console only")
 WMS_PATH = os.path.join(OPTIONS_DIR, "wms.list")
 EXTRAS_PATH = os.path.join(OPTIONS_DIR, "extras.list")
 COMPONENTS_PATH = os.path.join(OPTIONS_DIR, "components.list")
+OPTIONAL_PATH = os.path.join(ROOT_DIR, "packages", "optional.list")
 CUSTOM_PATH = os.path.join(OPTIONS_DIR, "custom.list")
 CUSTOM_DIR = os.path.join(OPTIONS_DIR, "custom")
 BOOT_PATH = os.path.join(ROOT_DIR, "packages", "boot.list")
@@ -295,6 +296,11 @@ def check_repo(url):
 		return True, "Repository reachable"
 	detail = (result.stderr.strip().splitlines() or ["no refs found"])[-1]
 	return False, f"Cannot reach repository: {detail}"
+
+
+def optional_rows():
+	"""(package, config flag) per optional package."""
+	return _rows(OPTIONAL_PATH)
 
 
 def custom_rows():
