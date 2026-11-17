@@ -61,8 +61,9 @@ preflight() {
 	done
 
 	# Input files and directories
-	for f in packages/live.list packages/target.list packages/firmware.list packages/boot.list \
-		packages/optional.list options/extras.list profile.env; do
+	for f in packages/live.list packages/target.list packages/boot.list \
+		packages/optional.list packages/headers.list packages/dkms.list packages/mesa.list \
+		options/extras.list profile.env; do
 		[ -f "$SCRIPT_DIR/$f" ] || problems+=("missing file $f")
 	done
 	for f in installer options/custom options/wm; do
@@ -166,7 +167,7 @@ rm -f "$ROOTFS_DIR/tmp/setup.sh" "$ROOTFS_DIR/tmp/live.list"
 
 msg "Installing DebPlus into the live environment..."
 install -d "$ROOTFS_DIR/opt/debplus/packages"
-install -m644 "$SCRIPT_DIR"/packages/{firmware,boot}.list "$ROOTFS_DIR/opt/debplus/packages/"
+install -m644 "$SCRIPT_DIR"/packages/*.list "$ROOTFS_DIR/opt/debplus/packages/"
 cp -a "$SCRIPT_DIR/installer" "$ROOTFS_DIR/opt/debplus/"
 install -d "$ROOTFS_DIR/opt/debplus/options"
 install -m644 "$SCRIPT_DIR/profile.env" "$ROOTFS_DIR/opt/debplus/"
@@ -182,6 +183,9 @@ cleanup_mounts
 # a flat apt repo on the ISO, and the installer installs just what was selected, offline if
 # need be. Both live in install/, outside live/, so live-boot does not layer them.
 pkg_list() { grep -hEv '^[[:space:]]*(#|$)' "$@" || true; }
+optional_names() {
+	awk -F'|' '!/^[[:space:]]*#/ && NF { gsub(/[ \t]/, "", $1); if ($1) print $1 }' "$1"
+}
 baked_extras() {
 	awk -F'|' '/^[[:space:]]*#/ || NF < 6 { next }
 		{ gsub(/^[ \t]+|[ \t]+$/, "", $6); if ($6 == "bake") print $3 }' "$1"
@@ -204,7 +208,8 @@ mount -t sysfs sys "$TARGET_DIR/sys"
 pkg_list "$SCRIPT_DIR/packages/target.list" | word_list > "$TARGET_DIR/tmp/base.pkgs"
 # BIOS and UEFI sets are downloaded separately because grub-pc conflicts with the UEFI stack
 {
-	pkg_list "$SCRIPT_DIR/packages/optional.list" "$SCRIPT_DIR/packages/firmware.list"
+	optional_names "$SCRIPT_DIR/packages/optional.list"
+	pkg_list "$SCRIPT_DIR/packages/headers.list"
 	baked_extras "$SCRIPT_DIR/options/extras.list"
 } | word_list > "$TARGET_DIR/tmp/common.pkgs"
 boot_set uefi | word_list > "$TARGET_DIR/tmp/uefi.pkgs"
