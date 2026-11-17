@@ -22,7 +22,7 @@ class Config:
 	username: str = ""
 	user_pass: str = ""
 	root_pass: str = ""     # blank disables root login
-	desktop: str = ""       # id from desktops.list or wms.list, "console" for none, "custom" for a git URL
+	desktop: str = ""       # id from wms.list, "console" for none, "custom" for a git URL
 	custom_repo: str = ""   # git URL, used when desktop == "custom"
 	components: list = field(default_factory=list)
 	hardware_packages: list = field(default_factory=list)

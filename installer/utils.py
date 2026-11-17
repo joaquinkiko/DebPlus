@@ -61,13 +61,6 @@ COUNTRY_LOCALES = {
 	"AU": "en_AU.UTF-8", "NZ": "en_NZ.UTF-8",
 }
 
-KEYBOARD_NAME_HINTS = (
-	("german", "de"), ("french", "fr"), ("spanish", "es"), ("italian", "it"),
-	("portuguese", "pt"), ("brazil", "br"), ("swedish", "se"), ("norwegian", "no"),
-	("danish", "dk"), ("finnish", "fi"), ("polish", "pl"), ("swiss", "ch"),
-	("japanese", "jp"), ("russian", "ru"),
-)
-
 LANGUAGE_NAMES_PATH = "/usr/share/iso-codes/json/iso_639-2.json"
 
 
@@ -89,22 +82,6 @@ def locale_country(locale_name):
 def locale_language(locale_name):
 	"""Language name for a locale code, or empty string if unknown."""
 	return language_names().get(locale_name.split("_")[0], "")
-
-
-def detect_keyboard_layout():
-	"""XKB layout guessed from keyboard device names, or None."""
-	try:
-		with open("/proc/bus/input/devices") as devices_file:
-			names = [line.split("=", 1)[1].strip().strip('"').lower()
-			         for line in devices_file
-			         if line.startswith("N: Name=") and "keyboard" in line.lower()]
-	except OSError:
-		return None
-	for name in names:
-		for hint, layout in KEYBOARD_NAME_HINTS:
-			if hint in name:
-				return layout
-	return None
 
 
 def locale_for_timezone(zone):
@@ -310,7 +287,7 @@ def mesa_packages():
 
 
 def custom_rows():
-	"""(id, menu, section, label, script) per script-installed package."""
+	"""(id, menu, section, label, script, requires) per script-installed package."""
 	return _rows(CUSTOM_PATH)
 
 
@@ -347,7 +324,6 @@ def _rows(path):
 
 def desktop_rows():
 	"""(id, label, package, description) per desktop. Console is always first."""
-	"""Old code"""
 	return [CONSOLE_ROW]
 
 
