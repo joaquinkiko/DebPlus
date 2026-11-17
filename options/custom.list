@@ -5,3 +5,7 @@ flatpak|software|Packages|Flatpak|flatpak.sh|-
 steam|software|Gaming|Steam|steam.sh|contrib,i386
 heroic|software|Gaming|Heroic|heroic.sh|flatpak
 sublime|software|Text Editing|Sublime|sublime.sh|-
+discord|software|Communication|Discord|discord.sh|flatpak
+signal|software|Communication|Signal|signal.sh|-
+vscode|software|Development|VS Code (Microsoft)|vscode.sh|-
+vscodium|software|Development|VS Codium (Libre Open-Source))|vscodium.sh|-
