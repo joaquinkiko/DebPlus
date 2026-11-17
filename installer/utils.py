@@ -34,7 +34,7 @@ MIN_DISK_GIB = 10
 WARN_DISK_GIB = 20
 REQUIRED_TOOLS = ("unsquashfs", "parted", "wipefs", "partprobe", "blkid",
                   "lsblk", "chroot", "mkfs.fat", "mkfs.ext4", "mkfs.btrfs",
-                  "mkfs.xfs", "mokutil", "timedatectl")
+                  "mkfs.xfs", "mokutil", "timedatectl", "cryptsetup")
 ESP_RESERVE_GIB = 1
 
 TIMEZONE_LOOKUPS = (

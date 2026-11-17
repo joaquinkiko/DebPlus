@@ -18,6 +18,7 @@ console-setup
 console-setup-linux
 console-data
 locales
+iso-codes
 xfonts-terminus
 iproute2
 iputils-ping
