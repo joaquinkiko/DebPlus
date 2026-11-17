@@ -21,6 +21,7 @@ WMS_PATH = os.path.join(OPTIONS_DIR, "wms.list")
 EXTRAS_PATH = os.path.join(OPTIONS_DIR, "extras.list")
 COMPONENTS_PATH = os.path.join(OPTIONS_DIR, "components.list")
 OPTIONAL_PATH = os.path.join(ROOT_DIR, "packages", "optional.list")
+MESA_PATH = os.path.join(ROOT_DIR, "packages", "mesa.list")
 CUSTOM_PATH = os.path.join(OPTIONS_DIR, "custom.list")
 CUSTOM_DIR = os.path.join(OPTIONS_DIR, "custom")
 BOOT_PATH = os.path.join(ROOT_DIR, "packages", "boot.list")
@@ -301,6 +302,11 @@ def check_repo(url):
 def optional_rows():
 	"""(package, config flag) per optional package."""
 	return _rows(OPTIONAL_PATH)
+
+
+def mesa_packages():
+	"""Mesa packages installed from trixie-backports."""
+	return read_lines(MESA_PATH)
 
 
 def custom_rows():

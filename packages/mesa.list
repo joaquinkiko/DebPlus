@@ -1,0 +1,7 @@
+# Mesa packages installed from trixie-backports when Backports Mesa is ticked. One per line.
+libgl1-mesa-dri
+libglx-mesa0
+libegl-mesa0
+libgbm1
+mesa-vulkan-drivers
+mesa-va-drivers

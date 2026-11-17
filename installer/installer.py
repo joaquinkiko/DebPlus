@@ -29,8 +29,6 @@ FSTAB_OPTIONS = {
 	"ext4": "errors=remount-ro",
 	"xfs": "defaults",
 }
-MESA_PACKAGES = ["libgl1-mesa-dri", "libglx-mesa0", "libegl-mesa0", "libgbm1",
-                 "mesa-vulkan-drivers", "mesa-va-drivers"]
 
 
 LOG_PATH = "/var/log/debplus/install.log"
@@ -462,7 +460,7 @@ def install_packages(config: Config):
 		     f"linux-image-amd64 linux-headers-amd64")
 	if config.backports_mesa:
 		msg("Installing backports Mesa...")
-		_run(f"chroot {MNT} {APT} install -y -t {SUITE}-backports {' '.join(MESA_PACKAGES)}")
+		_run(f"chroot {MNT} {APT} install -y -t {SUITE}-backports {' '.join(utils.mesa_packages())}")
 	_run(f"chroot {MNT} apt-get clean")
 
 
