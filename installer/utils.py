@@ -480,7 +480,7 @@ def wifi_scan():
 	return sorted(networks.values(), key=lambda entry: entry[1], reverse=True)
 
 
-def wifi_connect(ssid, password):
+def wifi_connect(ssid, password, security=""):
 	"""(success, message). Password is None for open networks."""
 	name = re.sub(r"[^A-Za-z0-9_-]", "_", ssid)
 	path = os.path.join("/etc/NetworkManager/system-connections", f"{name}.nmconnection")
@@ -489,7 +489,8 @@ def wifi_connect(ssid, password):
 		"[wifi]", f"ssid={ssid}", "mode=infrastructure", "",
 	]
 	if password:
-		lines += ["[wifi-security]", "key-mgmt=wpa-psk", f"psk={password}", ""]
+		key_lines = ["key-mgmt=sae", "pmf=3"] if "WPA3" in security.upper() else ["key-mgmt=wpa-psk"]
+		lines += ["[wifi-security]", *key_lines, f"psk={password}", ""]
 
 	fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
 	with os.fdopen(fd, "w") as profile_file:

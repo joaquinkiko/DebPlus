@@ -157,7 +157,7 @@ def _wifi_password(app, ssid, security):
 		if secured and not password:
 			status.set_text(("error", "  Password cannot be empty"))
 		else:
-			_wifi_connect(app, ssid, password)
+			_wifi_connect(app, ssid, password, security)
 
 	urwid.connect_signal(password_edit, "activate", connect)
 	items = [urwid.Text([("bold", "  Network: "), ("value", ssid)]), urwid.Divider()]
@@ -172,10 +172,10 @@ def _wifi_password(app, ssid, security):
 	app.show_screen(_screen("Wi-Fi", items))
 
 
-def _wifi_connect(app, ssid, password):
+def _wifi_connect(app, ssid, password, security):
 	app.show_screen(_screen("Wi-Fi", [urwid.Text(("warning", f"  Connecting to {ssid}..."))]))
 	app.loop.draw_screen()
-	connected, message = utils.wifi_connect(ssid, password)
+	connected, message = utils.wifi_connect(ssid, password, security)
 	_wifi_status(app, connected, message)
 
 
