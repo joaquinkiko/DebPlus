@@ -11,7 +11,6 @@ hardware|Graphics|firmware-intel-graphics intel-media-va-driver|Intel GPU firmwa
 hardware|Graphics|firmware-nvidia-graphics nvidia-detect nvidia-driver nvidia-kernel-dkms|NVIDIA driver|contrib,non-free-firmware,non-free|bake
 hardware|Graphics|nvidia-driver-libs:i386|NVIDIA 32-bit libraries (Gaming)|nvidia-driver,i386
 hardware|Graphics|nvidia-settings|NVIDIA settings panel|contrib,nvidia-driver|bake
-hardware|Graphics|nvidia-prime|NVIDIA PRIME (hybrid graphics)|nvidia-driver|bake
 hardware|Graphics|switcheroo-control|Hybrid graphics switching (laptops)|-|bake
 
 hardware|CPU|intel-microcode|Intel CPU microcode|non-free-firmware|bake
