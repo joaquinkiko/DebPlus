@@ -43,7 +43,7 @@ class Config:
 	swappiness: int = 60
 	secure_boot: bool = False  # set at startup from mokutil
 	mok_pass: str = field(default="", repr=False)  # one-time MOK enrollment password
-	
+
 	def set_online(self, online: bool):
 		"""Record connectivity. Going offline drops the choices that need the network."""
 		self.online = online
@@ -87,20 +87,15 @@ class Config:
 		return self.secure_boot and bool(words & dkms_packages())
 
 	def advanced_labels(self) -> list:
-		labels = []
-		if self.multiarch_i386:
-			labels.append("32-bit")
-		if self.backports_repo:
-			labels.append("backports")
-		if self.backports_kernel:
-			labels.append("backports kernel")
-		if self.backports_mesa:
-			labels.append("backports mesa")
-		if self.swappiness != 60:
-			labels.append(f"swappiness {self.swappiness}")
-		if not self.zram:
-			labels.append("no zram")
-		return labels
+		conditions = (
+			(self.multiarch_i386, "32-bit"),
+			(self.backports_repo, "backports"),
+			(self.backports_kernel, "backports kernel"),
+			(self.backports_mesa, "backports mesa"),
+			(self.swappiness != 60, f"swappiness {self.swappiness}"),
+			(not self.zram, "no zram"),
+		)
+		return [label for enabled, label in conditions if enabled]
 
 	def desktop_label(self) -> str:
 		return self.custom_repo if self.desktop == "custom" else self.desktop

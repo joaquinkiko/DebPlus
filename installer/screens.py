@@ -34,6 +34,8 @@ FILESYSTEM_CHOICES = [
 	("ext4",  "Simple and reliable"),
 	("xfs",   "High throughput, large files"),
 ]
+FIX_LABELS = {"network": "Fix network", "disk": "Choose another disk",
+              "clock": "Turn on time sync"}
 
 LOCALE_RESULT_LIMIT = 40
 RESERVED_USERNAMES = {"root", "daemon", "bin", "sys", "sync", "games", "man", "lp",
@@ -42,15 +44,6 @@ RESERVED_USERNAMES = {"root", "daemon", "bin", "sys", "sync", "games", "man", "l
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
-
-def _on_swappiness(_edit, new_text, app):
-	if new_text.isdigit() and int(new_text) <= 100:
-		app.config.swappiness = int(new_text)
-
-def _on_multiarch(_box, state, app):
-	app.config.multiarch_i386 = state
-	drop_unavailable(app.config)
-
 
 def _requirements_met(config, requirement):
 	needed = {name for name in requirement.split(",") if name != "-"}
@@ -82,11 +75,48 @@ def _set(app, attribute, value):
 	app.show_main()
 
 
+def _show_error(error_text, message):
+	error_text.set_text(("error", f"  {message}"))
+
+
+def _validate(rules):
+	"""Message of the first (failed, message) rule that failed, or None."""
+	return next((message for failed, message in rules if failed), None)
+
+
+def _form_screen(app, title, items, fields, on_submit):
+	"""Show a form. Enter on a field moves to the next; Enter on the last calls on_submit."""
+	listbox = _screen(title, items)
+
+	def advance(position):
+		if position == len(fields) - 1:
+			on_submit()
+		else:
+			listbox.set_focus(listbox.body.index(fields[position + 1]))
+
+	for position, field in enumerate(fields):
+		urwid.connect_signal(field, "activate", lambda _, p=position: advance(p))
+	app.show_screen(listbox)
+
+
 def _search_results(walker, matches, on_pick, label=str):
 	"""Refill a results walker with selectable matches."""
 	walker.clear()
 	for match in matches:
 		walker.append(_action(f"    {label(match)}", lambda _, v=match: on_pick(v)))
+
+
+def _bind_filter(edit, results, candidates, on_pick, label=str, limit=None):
+	"""Refill results from (value, search_text) candidates on every edit change."""
+	def refresh(text):
+		pattern = text.strip().lower()
+		matches = [value for value, search_text in candidates if pattern in search_text]
+		if limit and pattern:
+			matches = matches[:limit]
+		_search_results(results, matches, on_pick, label)
+
+	urwid.connect_signal(edit, "change", lambda _, text: refresh(text))
+	refresh("")
 
 
 def _on_toggle(_box, state, user_data):
@@ -103,6 +133,36 @@ def _on_flag(_box, state, user_data):
 	"""Set a boolean attribute on the config."""
 	app, attribute = user_data
 	setattr(app.config, attribute, state)
+
+
+def _on_format(_box, state, user_data):
+	app, role = user_data
+	app.config.layout[role]["format"] = state
+
+
+def _on_swappiness(_edit, new_text, app):
+	if new_text.isdigit() and int(new_text) <= 100:
+		app.config.swappiness = int(new_text)
+
+
+def _on_multiarch(_box, state, app):
+	app.config.multiarch_i386 = state
+	drop_unavailable(app.config)
+
+
+def _flag_rows(app, attribute, label, description):
+	"""Checkbox bound to a config flag, with a description line beneath it."""
+	return [
+		urwid.CheckBox(label, state=getattr(app.config, attribute),
+		               on_state_change=_on_flag, user_data=(app, attribute)),
+		urwid.Text(("label", f"      {description}")),
+		urwid.Divider(),
+	]
+
+
+def _wifi_busy(app, message):
+	app.show_screen(_screen("Wi-Fi", [urwid.Text(("warning", f"  {message}"))]))
+	app.loop.draw_screen()
 
 
 # ── Network ────────────────────────────────────────────────────────────
@@ -128,9 +188,7 @@ def _launch_nmtui(app):
 
 
 def _wifi_scan(app):
-	app.show_screen(_screen("Wi-Fi", [urwid.Text(("warning", "  Scanning..."))]))
-	app.loop.draw_screen()
-
+	_wifi_busy(app, "Scanning...")
 	networks = utils.wifi_scan()
 	items = []
 	if not networks:
@@ -173,8 +231,7 @@ def _wifi_password(app, ssid, security):
 
 
 def _wifi_connect(app, ssid, password, security):
-	app.show_screen(_screen("Wi-Fi", [urwid.Text(("warning", f"  Connecting to {ssid}..."))]))
-	app.loop.draw_screen()
+	_wifi_busy(app, f"Connecting to {ssid}...")
 	connected, message = utils.wifi_connect(ssid, password, security)
 	_wifi_status(app, connected, message)
 
@@ -190,17 +247,12 @@ def _wifi_status(app, passed, message):
 
 
 def _wifi_test(app):
-	app.show_screen(_screen("Wi-Fi", [urwid.Text(("warning", "  Testing..."))]))
-	app.loop.draw_screen()
+	_wifi_busy(app, "Testing...")
 	passed, message = utils.wifi_test()
 	_wifi_status(app, passed, message)
 
 
 # ── Pre-flight ─────────────────────────────────────────────────────────
-
-FIX_LABELS = {"network": "Fix network", "disk": "Choose another disk",
-              "clock": "Turn on time sync"}
-
 
 def _apply_fix(app, fix):
 	if fix == "network":
@@ -267,7 +319,7 @@ def keyboard(app):
 	def choose(layout):
 		error = utils.apply_keymap(layout)
 		if error:
-			error_text.set_text(("error", f"  {error}"))
+			_show_error(error_text, error)
 		else:
 			_set(app, "keymap", layout)
 
@@ -296,15 +348,9 @@ def _pick_timezone(app, zone):
 
 def timezone(app):
 	app.refresh_online()
-	all_zones = utils.get_timezones()
 	results = urwid.SimpleFocusListWalker([])
 	edit = urwid.Edit("  > ")
 	status = urwid.Text("")
-
-	def refresh(text):
-		pattern = text.strip().lower()
-		matches = [zone for zone in all_zones if pattern in zone.lower()]
-		_search_results(results, matches, lambda zone: _pick_timezone(app, zone))
 
 	def autodetect(_):
 		zone, reason = utils.detect_timezone()
@@ -313,18 +359,15 @@ def timezone(app):
 		else:
 			status.set_text(("error", f"  Autodetect failed: {reason}"))
 
-	urwid.connect_signal(edit, "change", lambda _, text: refresh(text))
-	refresh("")
+	candidates = [(zone, zone.lower()) for zone in utils.get_timezones()]
+	_bind_filter(edit, results, candidates, lambda zone: _pick_timezone(app, zone))
 
 	items = [
 		urwid.Text(("label", "  Scroll the list or type to filter (e.g., chicago, Europe/Oslo):")),
 		edit,
 	]
 	if app.online:
-		items += [
-			_action(("bold", "  Autodetect from network"), autodetect),
-			status,
-		]
+		items += [_action(("bold", "  Autodetect from network"), autodetect), status]
 	items += [
 		urwid.BoxAdapter(urwid.ListBox(results), 14),
 		urwid.Divider(),
@@ -352,25 +395,16 @@ def locale(app):
 	def accept(value):
 		value = _normalize_locale(value)
 		if not value or (supported and value not in supported):
-			error_text.set_text(("error", f"  '{value}' is not a known locale"))
+			_show_error(error_text, f"'{value}' is not a known locale")
 		else:
 			_set(app, "locale", value)
 
-	searchable = {loc: f"{loc} {utils.locale_language(loc)} {utils.locale_country(loc)}".lower()
-	              for loc in utf8_locales}
 	labels = {loc: f"{loc:<18}{utils.locale_language(loc):<20}{utils.locale_country(loc)}"
 	          for loc in utf8_locales}
-
-	def refresh(text):
-		pattern = text.strip().lower()
-		matches = [loc for loc in utf8_locales if pattern in searchable[loc]]
-		if pattern:
-			matches = matches[:LOCALE_RESULT_LIMIT]
-		_search_results(results, matches, accept, labels.get)
-
-	urwid.connect_signal(edit, "change", lambda _, text: refresh(text))
+	candidates = [(loc, f"{loc} {utils.locale_language(loc)} {utils.locale_country(loc)}".lower())
+	              for loc in utf8_locales]
+	_bind_filter(edit, results, candidates, accept, labels.get, LOCALE_RESULT_LIMIT)
 	urwid.connect_signal(edit, "activate", lambda _: accept(edit.edit_text))
-	refresh("")
 
 	items = [
 		urwid.Text(("label", "  Scroll the list or type to filter (e.g., en_US, SE, nb_NO):")),
@@ -387,8 +421,7 @@ def locale(app):
 
 def disk(app):
 	items = [
-			_action(f"  {device:<14}{size:<10}{model}",
-		        lambda _, v=device: _choose_disk(app, v))
+		_action(f"  {device:<14}{size:<10}{model}", lambda _, v=device: _choose_disk(app, v))
 		for device, size, model in utils.get_disks()
 	]
 	if not items:
@@ -456,11 +489,6 @@ def _assign(app, role, device):
 	partition_layout(app)
 
 
-def _on_format(_box, state, user_data):
-	app, role = user_data
-	app.config.layout[role]["format"] = state
-
-
 def _finish_manual(app):
 	config = app.config
 	if not config.layout_ready():
@@ -515,10 +543,6 @@ def _choose_filesystem(app, name):
 	filesystem(app)
 
 
-def _on_snapper(_box, state, app):
-	app.config.snapper = state
-
-
 def _on_luks(_box, state, app):
 	app.config.luks = state
 	if state:
@@ -538,7 +562,7 @@ def filesystem(app):
 	items.append(urwid.Divider())
 	if config.filesystem == "btrfs":
 		items.append(urwid.CheckBox("  Snapshots with snapper", state=config.snapper,
-		                            on_state_change=_on_snapper, user_data=app))
+		                            on_state_change=_on_flag, user_data=(app, "snapper")))
 	else:
 		items.append(urwid.Text(("unset", "  Snapshots with snapper  (needs btrfs)")))
 	items.append(urwid.Text(("label", "      Roll back system changes. Uses @ and @home subvolumes.")))
@@ -556,10 +580,12 @@ def luks_passphrase(app):
 	error_text = urwid.Text("")
 
 	def accept(_=None):
-		if len(passphrase.edit_text) < 8:
-			error_text.set_text(("error", "  Use at least 8 characters"))
-		elif passphrase.edit_text != confirm.edit_text:
-			error_text.set_text(("error", "  Passphrases don't match"))
+		error = _validate([
+			(len(passphrase.edit_text) < 8, "Use at least 8 characters"),
+			(passphrase.edit_text != confirm.edit_text, "Passphrases don't match"),
+		])
+		if error:
+			_show_error(error_text, error)
 		else:
 			app.config.luks_pass = passphrase.edit_text
 			app.show_main()
@@ -569,9 +595,6 @@ def luks_passphrase(app):
 		app.config.luks_pass = ""
 		app.show_main()
 
-	urwid.connect_signal(passphrase, "activate",
-	                     lambda _: listbox.set_focus(listbox.body.index(confirm)))
-	urwid.connect_signal(confirm, "activate", accept)
 	items = [
 		urwid.Text(("warning", "  Losing this passphrase means losing the data. There is no recovery.")),
 		urwid.Text(("label", "  You type it at every boot, using the keyboard layout you chose.")),
@@ -587,8 +610,7 @@ def luks_passphrase(app):
 		_action(("bold", "  Accept"), accept),
 		_action(("unset", "  Cancel (turn off encryption)"), cancel),
 	]
-	listbox = _screen("Encryption", items)
-	app.show_screen(listbox)
+	_form_screen(app, "Encryption", items, [passphrase, confirm], accept)
 
 
 # ── Hostname ───────────────────────────────────────────────────────────
@@ -597,14 +619,13 @@ def hostname(app):
 	edit = SubmitEdit("  Hostname: ", app.config.hostname)
 	error_text = urwid.Text("")
 
-	def accept(_):
+	def accept(_=None):
 		value = edit.edit_text
 		if re.match(r"^[a-zA-Z][a-zA-Z0-9-]*$", value):
 			_set(app, "hostname", value)
 		else:
-			error_text.set_text(("error", "  Invalid hostname"))
+			_show_error(error_text, "Invalid hostname")
 
-	urwid.connect_signal(edit, "activate", accept)
 	items = [
 		urwid.Text(("label", "  System identifier. Must start with a letter.")),
 		urwid.Divider(),
@@ -615,7 +636,7 @@ def hostname(app):
 		urwid.Divider(),
 		_back_button(app),
 	]
-	app.show_screen(_screen("Hostname", items))
+	_form_screen(app, "Hostname", items, [edit], accept)
 
 
 # ── User ───────────────────────────────────────────────────────────────
@@ -626,36 +647,25 @@ def user(app):
 	pass_confirm = SubmitEdit("  Confirm:  ", mask="*")
 	root_edit = SubmitEdit("  Root password: ", mask="*")
 	root_confirm = SubmitEdit("  Confirm:       ", mask="*")
-	fields = [username_edit, pass_edit, pass_confirm, root_edit, root_confirm]
 	error_text = urwid.Text("")
 
 	def accept(_=None):
 		name = username_edit.edit_text
-		if not re.match(r"^[a-z][a-z0-9_-]{0,31}$", name):
-			error_text.set_text(("error", "  Invalid username (1-32 characters)"))
-		elif name in RESERVED_USERNAMES or name.startswith("systemd-"):
-			error_text.set_text(("error", f"  '{name}' is reserved"))
-		elif not pass_edit.edit_text:
-			error_text.set_text(("error", "  Password cannot be empty"))
-		elif pass_edit.edit_text != pass_confirm.edit_text:
-			error_text.set_text(("error", "  User passwords don't match"))
-		elif root_edit.edit_text and root_edit.edit_text != root_confirm.edit_text:
-			error_text.set_text(("error", "  Root passwords don't match"))
+		error = _validate([
+			(not re.match(r"^[a-z][a-z0-9_-]{0,31}$", name), "Invalid username (1-32 characters)"),
+			(name in RESERVED_USERNAMES or name.startswith("systemd-"), f"'{name}' is reserved"),
+			(not pass_edit.edit_text, "Password cannot be empty"),
+			(pass_edit.edit_text != pass_confirm.edit_text, "User passwords don't match"),
+			(root_edit.edit_text and root_edit.edit_text != root_confirm.edit_text,
+			 "Root passwords don't match"),
+		])
+		if error:
+			_show_error(error_text, error)
 		else:
 			app.config.username = name
 			app.config.user_pass = pass_edit.edit_text
 			app.config.root_pass = root_edit.edit_text
 			app.show_main()
-
-	def advance(field):
-		position = fields.index(field)
-		if position == len(fields) - 1:
-			accept()
-		else:
-			listbox.set_focus(listbox.body.index(fields[position + 1]))
-
-	for field in fields:
-		urwid.connect_signal(field, "activate", lambda _, f=field: advance(f))
 
 	items = [
 		urwid.Text(("label", "  Lowercase letters, numbers, hyphens, underscores.")),
@@ -673,8 +683,8 @@ def user(app):
 		urwid.Divider(),
 		_back_button(app),
 	]
-	listbox = _screen("User Account", items)
-	app.show_screen(listbox)
+	fields = [username_edit, pass_edit, pass_confirm, root_edit, root_confirm]
+	_form_screen(app, "User Account", items, fields, accept)
 
 
 # ── Desktop and window managers ────────────────────────────────────────
@@ -731,13 +741,10 @@ def desktop(app):
 			urwid.Text(("warning", "  Offline: only Console only can be installed. Connect for desktops.")),
 			urwid.Divider(),
 		]
-	for desktop_id, label, package, description in utils.desktop_rows():
+	for desktop_id, label, package, description in [utils.CONSOLE_ROW]:
 		items += _choice_rows(app, desktop_id, label, package, description)
-	wm_items = []
-	for wm_id, label, repo, _ref, description in utils.wm_rows():
-		wm_items += _choice_rows(app, wm_id, label, "", description, enabled=app.online)
-	if wm_items:
-		items += wm_items
+	for wm_id, label, _repo, _ref, description in utils.wm_rows():
+		items += _choice_rows(app, wm_id, label, "", description, enabled=app.online)
 	if app.online:
 		items.append(_action("  Custom Repo", lambda _: _custom_repo(app)))
 	else:
@@ -810,11 +817,11 @@ def _package_row(app, menu, package, label, requirement):
 def _extras_screen(app, menu, title):
 	app.refresh_online()
 	entries = [(section, package, label, requirement)
-		for row_menu, section, package, label, requirement in utils.extras_rows()
-		if row_menu == menu]
+	           for row_menu, section, package, label, requirement in utils.extras_rows()
+	           if row_menu == menu]
 	entries += [(section, custom_id, label, requirement)
-		for custom_id, row_menu, section, label, _script, requirement in utils.custom_rows()
-		if row_menu == menu]
+	            for custom_id, row_menu, section, label, _script, requirement in utils.custom_rows()
+	            if row_menu == menu]
 	sections = {}
 	for section, package, label, requirement in entries:
 		sections.setdefault(section, []).append((package, label, requirement))
@@ -826,7 +833,7 @@ def _extras_screen(app, menu, title):
 	items += [
 		urwid.Divider(),
 		urwid.Text(("label", "  Optional. Installed after the desktop." if app.online
-			                     else "  Offline: only packages bundled on this ISO can be installed.")),
+		            else "  Offline: only packages bundled on this ISO can be installed.")),
 		urwid.Divider(),
 		_back_button(app),
 	]
@@ -850,17 +857,16 @@ def secure_boot(app):
 	error_text = urwid.Text("")
 
 	def accept(_=None):
-		if not 8 <= len(passphrase.edit_text) <= 16:
-			error_text.set_text(("error", "  Use 8 to 16 characters"))
-		elif passphrase.edit_text != confirm.edit_text:
-			error_text.set_text(("error", "  Passwords don't match"))
+		error = _validate([
+			(not 8 <= len(passphrase.edit_text) <= 16, "Use 8 to 16 characters"),
+			(passphrase.edit_text != confirm.edit_text, "Passwords don't match"),
+		])
+		if error:
+			_show_error(error_text, error)
 		else:
 			app.config.mok_pass = passphrase.edit_text
 			app.show_main()
 
-	urwid.connect_signal(passphrase, "activate",
-	                     lambda _: listbox.set_focus(listbox.body.index(confirm)))
-	urwid.connect_signal(confirm, "activate", accept)
 	items = [
 		urwid.Text(("label", "  Secure Boot is on, so DKMS drivers must be signed.")),
 		urwid.Text(("label", "  Set a one-time password. On first boot a blue MOK screen")),
@@ -874,11 +880,11 @@ def secure_boot(app):
 		urwid.Divider(),
 		_back_button(app),
 	]
-	listbox = _screen("Secure Boot", items)
-	app.show_screen(listbox)
+	_form_screen(app, "Secure Boot", items, [passphrase, confirm], accept)
 
 
 # ── Advanced ───────────────────────────────────────────────────────────
+
 def _on_backports_repo(_box, state, app):
 	app.config.backports_repo = state
 	if not state:
@@ -891,59 +897,41 @@ def advanced(app):
 	app.refresh_online()
 	config = app.config
 	items = [
-		urwid.CheckBox("  zram (compressed swap in RAM)", state=config.zram,
-		               on_state_change=_on_flag, user_data=(app, "zram")),
-		urwid.Text(("label", "      Recommended. Used before any swap partition. Doesn't support hibernation.")),
-		urwid.Divider(),
-		urwid.CheckBox("  Automatic security updates", state=config.auto_updates,
-		               on_state_change=_on_flag, user_data=(app, "auto_updates")),
-		urwid.Text(("label", "      Installs security fixes daily. Never reboots on its own.")),
-		urwid.Divider(),
+		*_flag_rows(app, "zram", "  zram (compressed swap in RAM)",
+		            "Recommended. Used before any swap partition. Doesn't support hibernation."),
+		*_flag_rows(app, "auto_updates", "  Automatic security updates",
+		            "Installs security fixes daily. Never reboots on its own."),
 		urwid.CheckBox("  32-bit (i386) support", state=config.multiarch_i386,
-		               on_state_change=_on_multiarch,
-		               user_data=app),
+		               on_state_change=_on_multiarch, user_data=app),
 		urwid.Text(("label", "      Adds the i386 architecture for 32-bit libraries and apps.")),
 		urwid.Divider(),
 	]
 	if not app.online:
-		items += [
-			urwid.Text(("unset", "  Backports repository, kernel and Mesa need internet.")),
-			urwid.Divider(),
-		]
+		items += [urwid.Text(("unset", "  Backports repository, kernel and Mesa need internet.")),
+		          urwid.Divider()]
 	else:
 		items += [
 			urwid.CheckBox("  Backports repository", state=config.backports_repo,
-			               on_state_change=_on_backports_repo,
-			               user_data=app),
+			               on_state_change=_on_backports_repo, user_data=app),
 			urwid.Text(("label", "      trixie-backports, pinned so nothing upgrades unless requested.")),
 			urwid.Divider(),
 		]
 	if app.online and config.backports_repo:
-		items += [
-			urwid.CheckBox("  Backports kernel", state=config.backports_kernel,
-			               on_state_change=_on_flag,
-			               user_data=(app, "backports_kernel")),
-			urwid.Text(("label", "      Newer kernel from trixie-backports, kept updated.")),
-			urwid.Divider(),
-			urwid.CheckBox("  Backports Mesa", state=config.backports_mesa,
-			               on_state_change=_on_flag,
-			               user_data=(app, "backports_mesa")),
-			urwid.Text(("label", "      Newer Mesa drivers from trixie-backports, kept updated.")),
-			urwid.Divider(),
-		]
+		items += _flag_rows(app, "backports_kernel", "  Backports kernel",
+		                    "Newer kernel from trixie-backports, kept updated.")
+		items += _flag_rows(app, "backports_mesa", "  Backports Mesa",
+		                    "Newer Mesa drivers from trixie-backports, kept updated.")
 	elif app.online:
-		items += [
-			urwid.Text(("unset", "  Backports kernel and Mesa require the backports repository.")),
-			urwid.Divider(),
-		]
+		items += [urwid.Text(("unset", "  Backports kernel and Mesa require the backports repository.")),
+		          urwid.Divider()]
 	swappiness_edit = urwid.Edit("  Swappiness (0-100): ", str(config.swappiness))
 	urwid.connect_signal(swappiness_edit, "change", _on_swappiness, app)
 	items += [
 		swappiness_edit,
 		urwid.Text(("label", "      Lower keeps more in RAM. 10 suits gaming, 60 is the default.")),
 		urwid.Divider(),
+		_back_button(app),
 	]
-	items.append(_back_button(app))
 	app.show_screen(_screen("Advanced", items),
 	                footer_text="  ↑↓ navigate  Space toggle  Esc back")
 

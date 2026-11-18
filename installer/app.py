@@ -36,7 +36,6 @@ CORNERS = (dict(tlcorner="╭", trcorner="╮", blcorner="╰", brcorner="╯")
 RAIL_WIDTH = 26
 MAIN_FOOTER = "  Tab/↑↓ navigate  Enter select  Esc back  q quit"
 SCREEN_FOOTER = "  Tab/↑↓ navigate  Enter select  Esc back"
-
 SPLASH_FOOTER = "  Tab/↑↓ navigate  Enter select  q quit"
 LOGO = """
        _,###._                                        ,#.                                    
@@ -59,16 +58,21 @@ def _chosen_label(selected):
 	return f"{len(selected)} selected" if selected else ""
 
 
+def _rail_item(glyph, glyph_style, label, label_style):
+	return Selectable([(glyph_style, f" {glyph} "), (label_style, label)])
+
+
 class App:
 	def __init__(self, config: Config):
 		self.config = config
 		self.install_requested = False
+		self.preflight = []
 		self._in_main = True
+		self._in_splash = False
 		self._menu_focus = 0
 		self._active_step = None
 		self.online = False
 		self.refresh_online()
-		self._in_splash = False
 
 		self.frame = urwid.Frame(
 			urwid.SolidFill(),
@@ -99,6 +103,16 @@ class App:
 		screens.drop_unavailable(self.config)
 		return self.online
 
+	def refresh_preflight(self):
+		"""Re-run the pre-flight checks. The single place they are run from the UI."""
+		self.preflight = utils.preflight(self.config, self.online)
+
+	def preflight_issues(self):
+		return any(check.level != "ok" for check in self.preflight)
+
+	def preflight_passed(self):
+		return not any(check.level == "block" for check in self.preflight)
+
 	def _filter_input(self, keys, raw):
 		"""Map Tab and Shift+Tab to Down and Up."""
 		return ["down" if key == "tab" else "up" if key == "shift tab" else key
@@ -115,12 +129,6 @@ class App:
 		right = urwid.Text(f"{self.config.boot_mode.upper()}  ", align="right")
 		return urwid.AttrMap(urwid.Columns([left, right]), "header")
 
-	def preflight_issues(self):
-		return any(check.level != "ok" for check in self.preflight)
-
-	def preflight_passed(self):
-		return not any(check.level == "block" for check in self.preflight)
-
 	def _make_footer(self, text):
 		return urwid.AttrMap(urwid.Text(text), "footer")
 
@@ -128,8 +136,7 @@ class App:
 		"""(label, value, callback) per step. A truthy value marks it done."""
 		config = self.config
 		steps = [
-			("Network",      "connected" if self.online else "",
-			                 lambda: screens.network(self)),
+			("Network",      "connected" if self.online else "", lambda: screens.network(self)),
 			("Keyboard",     config.keymap,     lambda: screens.keyboard(self)),
 			("Timezone",     config.timezone,   lambda: screens.timezone(self)),
 			("Locale",       config.locale,     lambda: screens.locale(self)),
@@ -138,7 +145,7 @@ class App:
 			("Hostname",     config.hostname,   lambda: screens.hostname(self)),
 			("User account", config.username,   lambda: screens.user(self)),
 			("Desktop",      config.desktop,    lambda: screens.desktop(self)),
-			("Components",     _chosen_label(config.components),
+			("Components",   _chosen_label(config.components),
 			                 lambda: screens.packages_menu(self)),
 			("Hardware",     _chosen_label(config.hardware_packages),
 			                 lambda: screens.hardware(self)),
@@ -156,37 +163,23 @@ class App:
 
 	def _build_rail(self, steps, active=None):
 		items = [urwid.Divider()]
-
 		for index, (label, value, callback) in enumerate(steps):
 			if index == active:
-				glyph, glyph_style, label_style = GLYPH_ACTIVE, "title", "bold"
+				item = _rail_item(GLYPH_ACTIVE, "title", label, "bold")
 			elif value:
-				glyph, glyph_style, label_style = GLYPH_DONE, "success", "bold"
+				item = _rail_item(GLYPH_DONE, "success", label, "bold")
 			else:
-				glyph, glyph_style, label_style = GLYPH_TODO, "unset", "label"
-			item = Selectable([(glyph_style, f" {glyph} "), (label_style, label)])
+				item = _rail_item(GLYPH_TODO, "unset", label, "label")
 			urwid.connect_signal(
 				item, "activate",
 				lambda _, cb=callback, idx=index: self._menu_activate(cb, idx))
 			items.append(item)
 
 		items.append(urwid.Divider())
-
-		if self.config.fake_mode:
-			install = urwid.Text(("warning", "   Install (testing mode)"))
-		elif self.config.ready() and self.preflight_passed():
-			install = Selectable(("success", f" {GLYPH_ACTIVE} Install"))
-			urwid.connect_signal(install, "activate",
-			                     lambda _: screens.summary(self))
-		else:
-			reason = (f"{self.config.missing_count()} to go"
-			          if self.config.missing_count() else "pre-flight")
-			install = urwid.Text(("unset", f"   Install ({reason})"))
-		items.append(install)
+		items.append(self._install_item())
 
 		shell = Selectable(("bold", "   Shell"))
-		urwid.connect_signal(shell, "activate",
-		                     lambda _: screens.drop_to_shell(self))
+		urwid.connect_signal(shell, "activate", lambda _: screens.drop_to_shell(self))
 		items.append(shell)
 
 		abort = Selectable(("bold", "   Abort"))
@@ -194,6 +187,18 @@ class App:
 		items.append(abort)
 
 		return urwid.ListBox(urwid.SimpleFocusListWalker(items))
+
+	def _install_item(self):
+		"""Install button, or a status line saying what is still missing."""
+		if self.config.fake_mode:
+			return urwid.Text(("warning", "   Install (testing mode)"))
+		if self.config.ready() and self.preflight_passed():
+			install = Selectable(("success", f" {GLYPH_ACTIVE} Install"))
+			urwid.connect_signal(install, "activate", lambda _: screens.summary(self))
+			return install
+		reason = (f"{self.config.missing_count()} to go"
+		          if self.config.missing_count() else "pre-flight")
+		return urwid.Text(("unset", f"   Install ({reason})"))
 
 	def _plan_panel(self):
 		config = self.config
@@ -210,7 +215,7 @@ class App:
 			("Desktop",    config.desktop_label()),
 			("Encryption", "LUKS2" if config.luks else "none"),
 			("Snapshots",  "snapper" if config.snapper else "none"),
-			("Components",   ", ".join(["main"] + config.components)),
+			("Components", ", ".join(["main"] + config.components)),
 			("Extras",     ", ".join(config.hardware_packages + config.software_packages)),
 			("Advanced",   ", ".join(config.advanced_labels())),
 		]:
@@ -220,8 +225,7 @@ class App:
 
 		if config.disk:
 			rows.append(urwid.Divider())
-			rows.append(urwid.Text(
-				("warning", f" ! {config.erase_text()}")))
+			rows.append(urwid.Text(("warning", f" ! {config.erase_text()}")))
 
 		box = urwid.LineBox(
 			urwid.Filler(urwid.Pile(rows), valign="top"),
@@ -229,6 +233,15 @@ class App:
 			**CORNERS,
 		)
 		return urwid.AttrMap(box, "border")
+
+	def _set_frame(self, steps, right, footer, active=None, focus_right=False):
+		"""Draw the rail beside right. Returns the rail so the caller can set its focus."""
+		rail = self._build_rail(steps, active)
+		body = urwid.Columns([(RAIL_WIDTH, rail), right], dividechars=2)
+		body.focus_position = 1 if focus_right else 0
+		self.frame.body = urwid.Padding(body, left=1, right=1)
+		self.frame.footer = self._make_footer(footer)
+		return rail
 
 	def show_splash(self):
 		"""Logo and entry options, shown before the install menu."""
@@ -253,8 +266,7 @@ class App:
 
 	def show_main(self):
 		"""Rail focused, install plan in the right pane."""
-		self.preflight = utils.preflight(self.config, self.online)
-
+		self.refresh_preflight()
 		if not (self._in_main or self._in_splash):
 			self._menu_focus += 1
 
@@ -264,13 +276,7 @@ class App:
 
 		steps = self._steps()
 		self._menu_focus = min(self._menu_focus, len(steps) - 1)
-
-		rail = self._build_rail(steps)
-		body = urwid.Columns([(RAIL_WIDTH, rail), self._plan_panel()],
-		                     dividechars=2)
-		self.frame.body = urwid.Padding(body, left=1, right=1)
-		self.frame.footer = self._make_footer(MAIN_FOOTER)
-
+		rail = self._set_frame(steps, self._plan_panel(), MAIN_FOOTER)
 		try:
 			rail.set_focus(self._menu_focus + 1)  # +1 skips the top divider
 		except (IndexError, ValueError):
@@ -279,13 +285,8 @@ class App:
 	def show_screen(self, widget, footer_text=None):
 		"""Open a step's screen in the right pane, rail stays visible."""
 		self._in_main = False
-
-		rail = self._build_rail(self._steps(), active=self._active_step)
-		body = urwid.Columns([(RAIL_WIDTH, rail), widget], dividechars=2)
-		body.focus_position = 1
-
-		self.frame.body = urwid.Padding(body, left=1, right=1)
-		self.frame.footer = self._make_footer(footer_text or SCREEN_FOOTER)
+		self._set_frame(self._steps(), widget, footer_text or SCREEN_FOOTER,
+		                active=self._active_step, focus_right=True)
 
 	def _menu_activate(self, callback, index):
 		self._menu_focus = index

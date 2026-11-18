@@ -2,35 +2,44 @@
 # Modifications Copyright (C) 2026 JoaquinKiko.
 # SPDX-License-Identifier: GPL-2.0-only. See COPYING and NOTICE.
 
+import functools
+import json
 import os
 import re
+import shutil
 import subprocess
 import time
-import shutil
-import json
-import functools
-from urllib.parse import urlparse
 from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urlparse
 
 MNT = "/mnt/debplus"
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OPTIONS_DIR = os.path.join(ROOT_DIR, "options")
+PACKAGES_DIR = os.path.join(ROOT_DIR, "packages")
 WM_DIR = os.path.join(OPTIONS_DIR, "wm")
-CONSOLE_ROW = ("console", "Console only", "-", "No desktop, text console only")
+CUSTOM_DIR = os.path.join(OPTIONS_DIR, "custom")
 WMS_PATH = os.path.join(OPTIONS_DIR, "wms.list")
 EXTRAS_PATH = os.path.join(OPTIONS_DIR, "extras.list")
 COMPONENTS_PATH = os.path.join(OPTIONS_DIR, "components.list")
-OPTIONAL_PATH = os.path.join(ROOT_DIR, "packages", "optional.list")
-MESA_PATH = os.path.join(ROOT_DIR, "packages", "mesa.list")
-HEADERS_PATH = os.path.join(ROOT_DIR, "packages", "headers.list")
-DKMS_PATH = os.path.join(ROOT_DIR, "packages", "dkms.list")
 CUSTOM_PATH = os.path.join(OPTIONS_DIR, "custom.list")
-CUSTOM_DIR = os.path.join(OPTIONS_DIR, "custom")
-BOOT_PATH = os.path.join(ROOT_DIR, "packages", "boot.list")
+OPTIONAL_PATH = os.path.join(PACKAGES_DIR, "optional.list")
+MESA_PATH = os.path.join(PACKAGES_DIR, "mesa.list")
+HEADERS_PATH = os.path.join(PACKAGES_DIR, "headers.list")
+DKMS_PATH = os.path.join(PACKAGES_DIR, "dkms.list")
+BOOT_PATH = os.path.join(PACKAGES_DIR, "boot.list")
+CONSOLE_ROW = ("console", "Console only", "-", "No desktop, text console only")
+
 # Outside live/ on purpose: live-boot layers every *.squashfs it finds in live/.
 TARGET_IMAGE = "/run/live/medium/install/target.squashfs"
 TARGET_REPO = "/run/live/medium/install/repo"  # flat apt repo of the optional packages
 REPO_SCHEMES = ("https", "http", "git")
+
+LANGUAGE_NAMES_PATH = "/usr/share/iso-codes/json/iso_639-2.json"
+SUPPORTED_LOCALES_PATH = "/usr/share/i18n/SUPPORTED"
+ZONEINFO_DIR = Path("/usr/share/zoneinfo")
+ZONE_REGIONS = ("Africa", "America", "Antarctica", "Asia", "Atlantic",
+                "Australia", "Europe", "Indian", "Pacific")
 
 MIN_RAM_MIB = 1024
 WARN_RAM_MIB = 2048
@@ -63,11 +72,20 @@ COUNTRY_LOCALES = {
 	"AU": "en_AU.UTF-8", "NZ": "en_NZ.UTF-8",
 }
 
-LANGUAGE_NAMES_PATH = "/usr/share/iso-codes/json/iso_639-2.json"
+
+@dataclass
+class Check:
+	level: str  # "block", "warn", or "ok"
+	title: str
+	message: str
+	fix: str = None  # "network", "disk", "clock", or None
 
 
+# ── Locale ─────────────────────────────────────────────────────────────
+
+@functools.lru_cache(maxsize=1)
 def language_names():
-	"""ISO 639-1 code -> English name, or empty dict if iso-codes is absent."""
+	"""ISO 639 code -> English name, or empty dict if iso-codes is absent."""
 	try:
 		with open(LANGUAGE_NAMES_PATH) as names_file:
 			entries = json.load(names_file)["639-2"]
@@ -75,34 +93,67 @@ def language_names():
 		return {}
 	return {entry["alpha_2"]: entry["name"] for entry in entries if "alpha_2" in entry}
 
+
 def locale_country(locale_name):
 	"""Territory code from a locale name, e.g. de_AT.UTF-8 -> AT, or empty string."""
 	base = locale_name.split(".")[0].split("@")[0]
 	parts = base.split("_")
 	return parts[1] if len(parts) > 1 else ""
 
+
 def locale_language(locale_name):
 	"""Language name for a locale code, or empty string if unknown."""
 	return language_names().get(locale_name.split("_")[0], "")
 
 
-def locale_for_timezone(zone):
-	"""Installed UTF-8 locale for the zone's country, or None."""
-	country_code = ""
+@functools.lru_cache(maxsize=1)
+def get_supported_locales():
+	"""Names from locales' SUPPORTED list, or an empty set if absent."""
 	try:
-		with open("/usr/share/zoneinfo/zone.tab") as zone_file:
+		with open(SUPPORTED_LOCALES_PATH) as supported_file:
+			return frozenset(line.split()[0] for line in supported_file if line.strip())
+	except OSError:
+		return frozenset()
+
+
+@functools.lru_cache(maxsize=1)
+def _zone_countries():
+	"""Zone name -> country code. The first zone.tab entry wins."""
+	countries = {}
+	try:
+		with open(ZONEINFO_DIR / "zone.tab") as zone_file:
 			for line in zone_file:
 				fields = line.split()
-				if len(fields) >= 3 and fields[2] == zone:
-					country_code = fields[0].split(",")[0]
-					break
+				if len(fields) >= 3:
+					countries.setdefault(fields[2], fields[0].split(",")[0])
 	except OSError:
-		return None
-	locale_name = COUNTRY_LOCALES.get(country_code)
+		pass
+	return countries
+
+
+def locale_for_timezone(zone):
+	"""Installed UTF-8 locale for the zone's country, or None."""
+	locale_name = COUNTRY_LOCALES.get(_zone_countries().get(zone, ""))
 	supported_locales = get_supported_locales()
 	if locale_name and (not supported_locales or locale_name in supported_locales):
 		return locale_name
 	return None
+
+
+# ── Timezone ───────────────────────────────────────────────────────────
+
+@functools.lru_cache(maxsize=1)
+def get_timezones():
+	"""Sorted zone names such as Europe/Oslo. Symlinks are skipped, as find -type f did."""
+	zones = []
+	for region in ZONE_REGIONS:
+		region_dir = ZONEINFO_DIR / region
+		if region_dir.is_dir():
+			zones += [str(path.relative_to(ZONEINFO_DIR))
+			          for path in region_dir.rglob("*")
+			          if path.is_file() and not path.is_symlink()]
+	return tuple(sorted(zones))
+
 
 def _extract_zone(body, path):
 	if not path:
@@ -111,6 +162,7 @@ def _extract_zone(body, path):
 	for key in path:
 		value = value.get(key, {}) if isinstance(value, dict) else ""
 	return value if isinstance(value, str) else ""
+
 
 def detect_timezone():
 	"""(zone, reason): zone from the public IP, or None with the reason it failed."""
@@ -130,17 +182,120 @@ def detect_timezone():
 		reason = f"{url} returned no valid zone"
 	return None, reason
 
+
+def enable_ntp():
+	run(["timedatectl", "set-ntp", "true"])
+
+
+# ── Disk and memory ────────────────────────────────────────────────────
+
 def disk_bytes(device):
 	return int(_query(["lsblk", "-bdno", "SIZE", device]) or 0)
 
 
-@dataclass
-class Check:
-	level: str  # "block", "warn", or "ok"
-	title: str
-	message: str
-	fix: str = None  # "network", "disk", "clock", or None
+def ram_kibibytes():
+	with open("/proc/meminfo") as meminfo_file:
+		return next(int(line.split()[1]) for line in meminfo_file
+		            if line.startswith("MemTotal:"))
 
+
+def ram_mib():
+	return ram_kibibytes() // 1024
+
+
+def _lsblk_entries(disk):
+	"""(device, type, size, filesystem) per device on disk. Missing columns are blank."""
+	entries = []
+	for line in run(["lsblk", "-lnpo", "NAME,TYPE,SIZE,FSTYPE", disk]).stdout.splitlines():
+		device, kind, size, filesystem = (line.split() + [""] * 4)[:4]
+		entries.append((device, kind, size, filesystem))
+	return entries
+
+
+def get_partitions(disk):
+	"""Partition device paths in order, ignoring device-mapper children."""
+	return [device for device, kind, _size, _filesystem in _lsblk_entries(disk)
+	        if kind == "part"]
+
+
+def partition_rows(disk):
+	"""(device, size, filesystem) per partition on disk."""
+	return [(device, size, filesystem or "unformatted")
+	        for device, kind, size, filesystem in _lsblk_entries(disk) if kind == "part"]
+
+
+def partition_table_type(disk):
+	"""'gpt', 'dos', or empty if unknown."""
+	return run(["blkid", "-s", "PTTYPE", "-o", "value", disk]).stdout.strip()
+
+
+def boot_medium_disk():
+	"""Whole-disk path the live medium was booted from, or None outside live mode."""
+	source = run(["findmnt", "-no", "SOURCE", "/run/live/medium"]).stdout.strip()
+	if not source:
+		return None
+	parent = run(["lsblk", "-no", "PKNAME", source]).stdout.strip().splitlines()
+	return f"/dev/{parent[0]}" if parent and parent[0] else source
+
+
+def get_disks():
+	"""(device, size, model) for whole disks, excluding floppy, RAM, loop, optical, and the boot medium."""
+	boot_disk = boot_medium_disk()
+	disks = []
+	for line in run("lsblk -dnpo NAME,SIZE,MODEL -e 1,2,7,11").stdout.splitlines():
+		parts = line.split(None, 2)
+		if len(parts) < 2 or "zram" in parts[0] or parts[0] == boot_disk:
+			continue
+		disks.append((parts[0], parts[1], parts[2].strip() if len(parts) > 2 else ""))
+	return disks
+
+
+# ── Boot and secure boot ───────────────────────────────────────────────
+
+def detect_boot_mode():
+	return "uefi" if os.path.isdir("/sys/firmware/efi") else "bios"
+
+
+def secure_boot_state():
+	return _query(["mokutil", "--sb-state"]).lower()
+
+
+def secure_boot_enabled():
+	return "enabled" in secure_boot_state()
+
+
+def boot_packages(mode):
+	"""Bootloader packages for a boot mode ("uefi" or "bios")."""
+	return next((packages.split() for row_mode, packages in _rows(BOOT_PATH)
+	             if row_mode == mode), [])
+
+
+def dkms_packages():
+	"""Packages that build modules with DKMS. Signed when Secure Boot is on."""
+	return set(read_lines(DKMS_PATH))
+
+
+def header_packages():
+	"""Kernel header packages every install needs for DKMS."""
+	return read_lines(HEADERS_PATH)
+
+
+def mesa_packages():
+	"""Mesa packages installed from trixie-backports."""
+	return read_lines(MESA_PATH)
+
+
+def target_image():
+	"""Path of the base system squashfs on the live medium, or None."""
+	return TARGET_IMAGE if os.path.isfile(TARGET_IMAGE) else None
+
+
+def target_repo():
+	"""Path of the local package repo on the live medium, or None."""
+	return TARGET_REPO if os.path.isfile(os.path.join(TARGET_REPO, "Packages.gz")) else None
+
+
+# ── Preflight ──────────────────────────────────────────────────────────
 
 def missing_tools():
 	"""Tools the installer image must ship. Empty when the image is complete."""
@@ -164,38 +319,36 @@ def _check_network(online):
 
 
 def _check_memory():
-	with open("/proc/meminfo") as meminfo_file:
-		kib = next(int(line.split()[1]) for line in meminfo_file
-		           if line.startswith("MemTotal:"))
-	gib = kib / 2**20
-	if kib < MIN_RAM_MIB * 1024:
+	kibibytes = ram_kibibytes()
+	gibibytes = kibibytes / 2**20
+	if kibibytes < MIN_RAM_MIB * 1024:
 		return Check("block", "Memory",
-		             f"This computer has {gib:.1f} GB. Debian needs at least "
+		             f"This computer has {gibibytes:.1f} GB. Debian needs at least "
 		             f"{MIN_RAM_MIB // 1024} GB to install.")
-	if kib < WARN_RAM_MIB * 1024:
+	if kibibytes < WARN_RAM_MIB * 1024:
 		return Check("warn", "Memory",
-		             f"This computer has {gib:.1f} GB. Install works, but the desktop "
+		             f"This computer has {gibibytes:.1f} GB. Install works, but the desktop "
 		             f"may feel slow. {WARN_RAM_MIB // 1024} GB or more is recommended.")
-	return Check("ok", "Memory", f"{gib:.1f} GB")
+	return Check("ok", "Memory", f"{gibibytes:.1f} GB")
 
 
 def _check_disk(device):
-	gib = int(_query(["lsblk", "-bdno", "SIZE", device]) or 0) / 2**30
-	if gib < MIN_DISK_GIB:
+	gibibytes = disk_bytes(device) / 2**30
+	if gibibytes < MIN_DISK_GIB:
 		return Check("block", "Disk",
-		             f"The chosen disk is {gib:.0f} GB. Debian needs at least "
+		             f"The chosen disk is {gibibytes:.0f} GB. Debian needs at least "
 		             f"{MIN_DISK_GIB} GB.", "disk")
-	if gib < WARN_DISK_GIB:
+	if gibibytes < WARN_DISK_GIB:
 		return Check("warn", "Disk",
-		             f"The chosen disk is {gib:.0f} GB. Install works, but space will "
+		             f"The chosen disk is {gibibytes:.0f} GB. Install works, but space will "
 		             f"be tight. {WARN_DISK_GIB} GB or more is recommended.", "disk")
-	return Check("ok", "Disk", f"{gib:.0f} GB")
+	return Check("ok", "Disk", f"{gibibytes:.0f} GB")
 
 
 def _check_secure_boot():
 	if detect_boot_mode() != "uefi":
 		return Check("ok", "Secure Boot", "not applicable")
-	state = _query(["mokutil", "--sb-state"]).lower()
+	state = secure_boot_state()
 	if "enabled" in state:
 		return Check("ok", "Secure Boot",
 		             "on. Debian supports it. Some drivers, such as NVIDIA, need a one-time key enrollment after install.")
@@ -210,28 +363,6 @@ def _check_clock():
 	return Check("warn", "Clock",
 	             "The clock is not synced over the internet. A wrong time can "
 	             "cause package download errors.", "clock")
-
-
-def enable_ntp():
-	run(["timedatectl", "set-ntp", "true"])
-
-
-def target_image():
-	"""Path of the base system squashfs on the live medium, or None."""
-	return TARGET_IMAGE if os.path.isfile(TARGET_IMAGE) else None
-
-
-def target_repo():
-	"""Path of the local package repo on the live medium, or None."""
-	return TARGET_REPO if os.path.isfile(os.path.join(TARGET_REPO, "Packages.gz")) else None
-
-
-def boot_packages(mode):
-	"""Bootloader packages for a boot mode ("uefi" or "bios")."""
-	for row_mode, packages in _rows(BOOT_PATH):
-		if row_mode == mode:
-			return packages.split()
-	return []
 
 
 def _check_image():
@@ -278,34 +409,7 @@ def check_repo(url):
 	return False, f"Cannot reach repository: {detail}"
 
 
-def optional_rows():
-	"""(package, config flag) per optional package."""
-	return _rows(OPTIONAL_PATH)
-
-
-def mesa_packages():
-	"""Mesa packages installed from trixie-backports."""
-	return read_lines(MESA_PATH)
-
-
-def header_packages():
-	"""Kernel header packages every install needs for DKMS."""
-	return read_lines(HEADERS_PATH)
-
-
-def dkms_packages():
-	"""Packages that build modules with DKMS. Signed when Secure Boot is on."""
-	return set(read_lines(DKMS_PATH))
-
-
-def secure_boot_enabled():
-	return "enabled" in _query(["mokutil", "--sb-state"]).lower()
-
-
-def custom_rows():
-	"""(id, menu, section, label, script, requires) per script-installed package."""
-	return _rows(CUSTOM_PATH)
-
+# ── Package lists ──────────────────────────────────────────────────────
 
 def run(command):
 	"""Run a shell string or argv list, capturing output."""
@@ -325,11 +429,12 @@ def load_profile(path):
 	return profile
 
 
+@functools.lru_cache(maxsize=None)
 def read_lines(path):
-	"""Non-blank, non-comment lines of a list file."""
+	"""Non-blank, non-comment lines of a list file, as a tuple."""
 	with open(path) as list_file:
-		return [line.strip() for line in list_file
-		        if line.strip() and not line.startswith("#")]
+		return tuple(line.strip() for line in list_file
+		             if line.strip() and not line.startswith("#"))
 
 
 def _rows(path):
@@ -338,9 +443,14 @@ def _rows(path):
 	        for line in read_lines(path)]
 
 
-def desktop_rows():
-	"""(id, label, package, description) per desktop. Console is always first."""
-	return [CONSOLE_ROW]
+def optional_rows():
+	"""(package, config flag) per optional package."""
+	return _rows(OPTIONAL_PATH)
+
+
+def custom_rows():
+	"""(id, menu, section, label, script, requires) per script-installed package."""
+	return _rows(CUSTOM_PATH)
 
 
 def wm_rows():
@@ -376,9 +486,20 @@ def components_rows():
 	return _rows(COMPONENTS_PATH)
 
 
+def package_requirements():
+	"""Package id -> required archive id, or '-' when none."""
+	requirements = {package: requires
+	                for _menu, _section, package, _label, requires in extras_rows()}
+	requirements.update({custom_id: requires
+	                     for custom_id, _menu, _section, _label, _script, requires in custom_rows()})
+	return requirements
+
+
 PROFILE = load_profile(os.path.join(ROOT_DIR, "profile.env"))
 MIRROR = PROFILE["MIRROR"]
 
+
+# ── Keyboard ───────────────────────────────────────────────────────────
 
 def keyboard_config(layout):
 	"""Contents of /etc/default/keyboard for an XKB layout."""
@@ -405,66 +526,12 @@ def apply_keymap(layout):
 	return None
 
 
-def get_supported_locales():
-	"""Names from locales' SUPPORTED list, or an empty set if absent."""
-	try:
-		with open("/usr/share/i18n/SUPPORTED") as supported_file:
-			return {line.split()[0] for line in supported_file if line.strip()}
-	except OSError:
-		return set()
-
-
-def detect_boot_mode():
-	return "uefi" if os.path.isdir("/sys/firmware/efi") else "bios"
-
+# ── Network ────────────────────────────────────────────────────────────
 
 def is_online():
 	if run(["nmcli", "-t", "-f", "CONNECTIVITY", "general"]).stdout.strip() == "full":
 		return True
 	return run("ping -c 1 -W 1 1.1.1.1").returncode == 0
-
-
-def boot_medium_disk():
-	"""Whole-disk path the live medium was booted from, or None outside live mode."""
-	source = run(["findmnt", "-no", "SOURCE", "/run/live/medium"]).stdout.strip()
-	if not source:
-		return None
-	parent = run(["lsblk", "-no", "PKNAME", source]).stdout.strip().splitlines()
-	return f"/dev/{parent[0]}" if parent and parent[0] else source
-
-
-def get_disks():
-	"""(device, size, model) for whole disks, excluding floppy, RAM, loop, optical, and the boot medium."""
-	boot_disk = boot_medium_disk()
-	disks = []
-	for line in run("lsblk -dnpo NAME,SIZE,MODEL -e 1,2,7,11").stdout.splitlines():
-		parts = line.split(None, 2)
-		if len(parts) < 2 or "zram" in parts[0] or parts[0] == boot_disk:
-			continue
-		disks.append((parts[0], parts[1], parts[2].strip() if len(parts) > 2 else ""))
-	return disks
-
-
-def get_timezones():
-	result = run(
-		"find /usr/share/zoneinfo/Africa /usr/share/zoneinfo/America "
-		"/usr/share/zoneinfo/Antarctica /usr/share/zoneinfo/Asia "
-		"/usr/share/zoneinfo/Atlantic /usr/share/zoneinfo/Australia "
-		"/usr/share/zoneinfo/Europe /usr/share/zoneinfo/Indian "
-		"/usr/share/zoneinfo/Pacific -type f 2>/dev/null | "
-		"sed 's|/usr/share/zoneinfo/||' | sort"
-	)
-	return result.stdout.strip().splitlines()
-
-
-def get_partitions(disk):
-	"""Partition device paths in order, ignoring device-mapper children."""
-	partitions = []
-	for line in run(f"lsblk -lnpo NAME,TYPE {disk}").stdout.splitlines():
-		fields = line.split()
-		if len(fields) >= 2 and fields[1] == "part":
-			partitions.append(fields[0])
-	return partitions
 
 
 def wifi_scan():
@@ -518,33 +585,3 @@ def wifi_test():
 	if code.startswith(("2", "3")):
 		return True, f"Connected, {MIRROR} reachable (HTTP {code})"
 	return False, f"Connected, but {MIRROR} is unreachable (HTTP {code or 'none'})"
-
-
-def package_requirements():
-	"""Package id -> required archive id, or '-' when none."""
-	requirements = {package: requires
-	                for _menu, _section, package, _label, requires in extras_rows()}
-	requirements.update({custom_id: requires
-	                     for custom_id, _menu, _section, _label, _script, requires in custom_rows()})
-	return requirements
-
-
-def partition_rows(disk):
-	"""(device, size, filesystem) per partition on disk."""
-	rows = []
-	for line in run(["lsblk", "-lnpo", "NAME,TYPE,SIZE,FSTYPE", disk]).stdout.splitlines():
-		fields = line.split() + ["", ""]
-		if fields[1] == "part":
-			rows.append((fields[0], fields[2], fields[3] or "unformatted"))
-	return rows
-
-
-def partition_table_type(disk):
-	"""'gpt', 'dos', or empty if unknown."""
-	return run(["blkid", "-s", "PTTYPE", "-o", "value", disk]).stdout.strip()
-
-def ram_mib():
-	with open("/proc/meminfo") as meminfo_file:
-		kib = next(int(line.split()[1]) for line in meminfo_file
-		           if line.startswith("MemTotal:"))
-	return kib // 1024

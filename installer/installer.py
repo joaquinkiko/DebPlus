@@ -4,17 +4,17 @@
 
 import os
 import re
+import select
+import shlex
 import shutil
 import subprocess
-import select
 import sys
 import termios
 import time
-import shlex
 
 from . import utils
 from .config import Config
-from .utils import MNT, PROFILE, get_partitions, keyboard_config
+from .utils import MNT, MIRROR, PROFILE, get_partitions, keyboard_config
 
 BOLD = "\033[1m"
 RED = "\033[0;31m"
@@ -23,14 +23,13 @@ CYAN = "\033[0;36m"
 NC = "\033[0m"
 
 SUITE = PROFILE["SUITE"]
-MIRROR = PROFILE["MIRROR"]
+KEYRING_LINE = "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"
 PARTED_FS_HINT = {"btrfs": "btrfs", "ext4": "ext4", "xfs": "ext2"}
 FSTAB_OPTIONS = {
 	"btrfs": "defaults,compress=zstd,noatime",
 	"ext4": "errors=remount-ro",
 	"xfs": "defaults",
 }
-
 
 LOG_PATH = "/var/log/debplus/install.log"
 STATE_PATH = "/run/debplus/state"
@@ -39,6 +38,12 @@ ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
 LUKS_ROOT = "cryptroot"
 LUKS_SWAP = "cryptswap"
 SWAP_KEY_LIVE = "/run/debplus/swap.key"
+
+LOCAL_REPO_MOUNT = "/media/debplus-repo"  # inside the target, only during install
+APT = "env DEBIAN_FRONTEND=noninteractive apt-get"
+# Offline apt: read only the local repo. Check-Date off because an offline RTC is often wrong.
+LOCAL_APT = ("-o Dir::Etc::sourcelist=debplus-local.list -o Dir::Etc::sourceparts=- "
+             "-o APT::Sandbox::User=root -o Acquire::Check-Date=false")
 
 PROGRESS_BAR_WIDTH = 40
 REBOOT_DELAY_SECONDS = 30
@@ -91,6 +96,8 @@ class Progress:
 PROGRESS = Progress()
 
 
+# ── Output and command helpers ─────────────────────────────────────────
+
 def _emit(text, stream=sys.stdout):
 	print(text, file=stream)
 	os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
@@ -124,6 +131,46 @@ def _run(command, quiet=False):
 
 def _try(command):
 	subprocess.run(command, shell=True, capture_output=True)
+
+
+def _chroot(command, quiet=False):
+	return _run(f"chroot {MNT} {command}", quiet)
+
+
+def _chroot_ok(command):
+	"""Run a chroot command and return success instead of raising."""
+	return subprocess.run(f"chroot {MNT} {command}", shell=True).returncode == 0
+
+
+def _apt(arguments, quiet=False):
+	return _chroot(f"{APT} {arguments}", quiet)
+
+
+def _report(label, succeeded, hint):
+	"""Report an optional step's outcome. Failure is recorded by the caller, not raised."""
+	if succeeded:
+		ok(f"{label} installed")
+		return True
+	print(f"  {RED}{label} failed. {hint}{NC}")
+	return False
+
+
+def _write_target(path, content, append=False, permissions=None):
+	"""Write a file inside the target. path is absolute within the target."""
+	with open(f"{MNT}{path}", "a" if append else "w") as target_file:
+		target_file.write(content)
+	if permissions is not None:
+		os.chmod(f"{MNT}{path}", permissions)
+
+
+def _blkid(device, field):
+	return subprocess.run(["blkid", "-s", field, "-o", "value", device],
+	                      capture_output=True, text=True).stdout.strip()
+
+
+def _unmount(path, flags=""):
+	"""Unmount quietly. flags carries a trailing space when given, e.g. "-l "."""
+	_try(f"umount {flags}{path}")
 
 
 # ── Partitioning ───────────────────────────────────────────────────────
@@ -192,14 +239,13 @@ def _format_layout(config: Config):
 
 
 def _mount_layout(config: Config):
-	layout = config.layout
 	root = _device(config, "root")
 	btrfs = config.filesystem == "btrfs"
 	os.makedirs(MNT, exist_ok=True)
 	if btrfs:
 		_run(f"mount {root} {MNT}")
 		_run(f"btrfs subvolume create {MNT}/@")
-		if "home" not in layout:
+		if "home" not in config.layout:
 			_run(f"btrfs subvolume create {MNT}/@home")
 		_run(f"umount {MNT}")
 	subvolume_option = "-o subvol=@ " if btrfs else ""
@@ -265,7 +311,7 @@ def _encrypt_layout(config: Config):
 
 
 def partition_disk(config: Config):
-	_try(f"umount -Rl {MNT}")
+	_unmount(MNT, "-Rl ")
 	_close_mappers()
 	if config.manual:
 		msg("Using selected partitions...")
@@ -287,7 +333,7 @@ def _fstab_rows(config: Config):
 	         FSTAB_OPTIONS[config.filesystem] + (",subvol=@" if btrfs else ""), 1)]
 	if "home" in layout:
 		home_device = layout["home"]["device"]
-		home_type = _fs_type(home_device)
+		home_type = _blkid(home_device, "TYPE")
 		rows.append((home_device, "/home", home_type,
 		             FSTAB_OPTIONS.get(home_type, "defaults"), 2))
 	elif btrfs:
@@ -303,70 +349,57 @@ def _fstab_rows(config: Config):
 def write_fstab(config: Config):
 	lines = ["# <filesystem>  <mount>  <type>  <options>  <dump>  <pass>"]
 	for device, mount_point, filesystem, options, pass_number in _fstab_rows(config):
-		spec = device if device.startswith("/dev/mapper/") else f"UUID={_uuid(device)}"
+		spec = device if device.startswith("/dev/mapper/") else f"UUID={_blkid(device, 'UUID')}"
 		lines.append(f"{spec}  {mount_point}  {filesystem}  {options}  0  {pass_number}")
-	with open(f"{MNT}/etc/fstab", "w") as fstab_file:
-		fstab_file.write("\n".join(lines) + "\n")
+	_write_target("/etc/fstab", "\n".join(lines) + "\n")
 
 
 # ── Chroot mounts ──────────────────────────────────────────────────────
 
 def mount_chroot_fs():
-	_run(f"mount --bind /dev {MNT}/dev")
-	_run(f"mount --bind /dev/pts {MNT}/dev/pts")
-	_run(f"mount -t proc proc {MNT}/proc")
-	_run(f"mount -t sysfs sys {MNT}/sys")
+	for command in (f"mount --bind /dev {MNT}/dev",
+	                f"mount --bind /dev/pts {MNT}/dev/pts",
+	                f"mount -t proc proc {MNT}/proc",
+	                f"mount -t sysfs sys {MNT}/sys"):
+		_run(command)
 	if os.path.isdir("/sys/firmware/efi/efivars"):
 		_try(f"mount --bind /sys/firmware/efi/efivars {MNT}/sys/firmware/efi/efivars")
 
 
 # ── Apt sources ────────────────────────────────────────────────────────
 
+def _apt_stanza(uri, suites, components):
+	return f"Types: deb\nURIs: {uri}\nSuites: {suites}\nComponents: {components}\n{KEYRING_LINE}\n"
+
+
+def _write_backports_pins(config: Config):
+	"""Keep backports opt-in: pin it low, then raise only the packages the user ticked."""
+	pin_blocks = [f"Package: *\nPin: release a={SUITE}-backports\nPin-Priority: 100\n"]
+	if config.backports_kernel:
+		pin_blocks.append(f"Package: linux-image-amd64 linux-headers-amd64\n"
+		                  f"Pin: release a={SUITE}-backports\nPin-Priority: 990\n")
+	if config.backports_mesa:
+		# Glob catches the Mesa libraries and drivers; libgbm1 has no "mesa" in its name
+		pin_blocks.append(f"Package: *mesa* libgbm1\n"
+		                  f"Pin: release a={SUITE}-backports\nPin-Priority: 990\n")
+	os.makedirs(f"{MNT}/etc/apt/preferences.d", exist_ok=True)
+	_write_target("/etc/apt/preferences.d/backports", "\n".join(pin_blocks))
+
+
 def write_apt_sources(config: Config):
 	components = " ".join(["main"] + config.components)
-	keyring = "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"
 	stanzas = [
-		f"Types: deb\nURIs: {MIRROR}\nSuites: {SUITE} {SUITE}-updates\n"
-		f"Components: {components}\n{keyring}\n",
-		f"Types: deb\nURIs: http://security.debian.org/debian-security\n"
-		f"Suites: {SUITE}-security\nComponents: {components}\n{keyring}\n",
+		_apt_stanza(MIRROR, f"{SUITE} {SUITE}-updates", components),
+		_apt_stanza("http://security.debian.org/debian-security", f"{SUITE}-security", components),
 	]
-
-	backports_enabled = config.backports_repo or config.backports_kernel or config.backports_mesa
-	if backports_enabled:
-		stanzas.append(
-			f"Types: deb\nURIs: {MIRROR}\nSuites: {SUITE}-backports\n"
-			f"Components: {components}\n{keyring}\n"
-		)
-		os.makedirs(f"{MNT}/etc/apt/preferences.d", exist_ok=True)
-		with open(f"{MNT}/etc/apt/preferences.d/backports", "w") as pin_file:
-			# Repo stays opt-in: packages install only with -t
-			pin_file.write(f"Package: *\nPin: release a={SUITE}-backports\n"
-			               f"Pin-Priority: 100\n")
-			if config.backports_kernel:
-				pin_file.write(f"\nPackage: linux-image-amd64 linux-headers-amd64\n"
-				               f"Pin: release a={SUITE}-backports\n"
-				               f"Pin-Priority: 990\n")
-			if config.backports_mesa:
-				# Glob catches the Mesa libraries and drivers; libgbm1 has no "mesa" in its name
-				pin_file.write(f"\nPackage: *mesa* libgbm1\n"
-				               f"Pin: release a={SUITE}-backports\n"
-				               f"Pin-Priority: 990\n")
-
-	with open(f"{MNT}/etc/apt/sources.list.d/debian.sources", "w") as sources_file:
-		sources_file.write("\n".join(stanzas))
-	with open(f"{MNT}/etc/apt/sources.list", "w"):
-		pass
+	if config.backports_repo or config.backports_kernel or config.backports_mesa:
+		stanzas.append(_apt_stanza(MIRROR, f"{SUITE}-backports", components))
+		_write_backports_pins(config)
+	_write_target("/etc/apt/sources.list.d/debian.sources", "\n".join(stanzas))
+	_write_target("/etc/apt/sources.list", "")
 
 
 # ── Base system ────────────────────────────────────────────────────────
-
-APT = "env DEBIAN_FRONTEND=noninteractive apt-get"
-LOCAL_REPO_MOUNT = "/media/debplus-repo"  # inside the target, only during install
-# Offline apt: read only the local repo. Check-Date off because an offline RTC is often wrong.
-LOCAL_APT = ("-o Dir::Etc::sourcelist=debplus-local.list -o Dir::Etc::sourceparts=- "
-	            "-o APT::Sandbox::User=root -o Acquire::Check-Date=false")
-
 
 def packages_to_install(config: Config) -> list:
 	"""Packages beyond the base image: bootloader, chosen options, shipped extras."""
@@ -383,14 +416,13 @@ def packages_to_install(config: Config) -> list:
 def _unmount_all():
 	"""Release chroot and secondary mounts so a retried extraction starts clean."""
 	for sub in ("sys/firmware/efi/efivars", "sys", "proc", "dev/pts", "dev", "boot/efi", "home"):
-		_try(f"umount -l {MNT}/{sub}")
+		_unmount(f"{MNT}/{sub}", "-l ")
 
 
 def reset_identity():
 	"""The image is shared by every install, so give this one its own identity."""
 	msg("Resetting machine identity...")
-	with open(f"{MNT}/etc/machine-id", "w"):
-		pass  # empty file: systemd generates a new id on first boot
+	_write_target("/etc/machine-id", "")  # empty: systemd generates a new id on first boot
 	_try(f"rm -f {MNT}/var/lib/dbus/machine-id")
 	_try(f"ln -s /etc/machine-id {MNT}/var/lib/dbus/machine-id")
 	_try(f"rm -f {MNT}/etc/ssh/ssh_host_*")
@@ -408,13 +440,11 @@ def _install_from_local_repo(packages):
 	os.makedirs(mount_point, exist_ok=True)
 	_run(f"mount --bind {shlex.quote(repo)} {mount_point}")
 	try:
-		with open(f"{MNT}/etc/apt/debplus-local.list", "w") as source_file:
-			source_file.write(f"deb [trusted=yes] file:{LOCAL_REPO_MOUNT} ./\n")
-		_run(f"chroot {MNT} {APT} {LOCAL_APT} update", quiet=True)
-		_run(f"chroot {MNT} {APT} {LOCAL_APT} install -y --no-install-recommends "
-		     f"{' '.join(packages)}", quiet=True)
+		_write_target("/etc/apt/debplus-local.list", f"deb [trusted=yes] file:{LOCAL_REPO_MOUNT} ./\n")
+		_apt(f"{LOCAL_APT} update", quiet=True)
+		_apt(f"{LOCAL_APT} install -y --no-install-recommends {' '.join(packages)}", quiet=True)
 	finally:
-		_try(f"umount {mount_point}")
+		_unmount(mount_point)
 		_try(f"rmdir {mount_point}")
 		_try(f"rm -f {MNT}/etc/apt/debplus-local.list")
 		_try(f"rm -rf {MNT}/var/lib/apt/lists/*")
@@ -425,25 +455,23 @@ def install_packages(config: Config):
 	packages = packages_to_install(config)
 	if config.boot_mode == "bios":
 		# Empty install_devices keeps grub-pc from prompting. The bootloader stage installs GRUB.
-		_run(f"chroot {MNT} sh -c \"echo 'grub-pc grub-pc/install_devices string' "
-		     f"| debconf-set-selections\"")
+		_chroot("sh -c \"echo 'grub-pc grub-pc/install_devices string' | debconf-set-selections\"")
 	if not config.online:
 		if packages:
 			_install_from_local_repo(packages)
 		return
 	msg("Updating packages...")
-	_run(f"chroot {MNT} {APT} update")
+	_apt("update")
 	if packages:
-		_run(f"chroot {MNT} {APT} install -y --no-install-recommends {' '.join(packages)}")
-	_run(f"chroot {MNT} {APT} upgrade -y")
+		_apt(f"install -y --no-install-recommends {' '.join(packages)}")
+	_apt("upgrade -y")
 	if config.backports_kernel:
 		msg("Installing backports kernel...")
-		_run(f"chroot {MNT} {APT} install -y -t {SUITE}-backports "
-		     f"linux-image-amd64 linux-headers-amd64")
+		_apt(f"install -y -t {SUITE}-backports linux-image-amd64 linux-headers-amd64")
 	if config.backports_mesa:
 		msg("Installing backports Mesa...")
-		_run(f"chroot {MNT} {APT} install -y -t {SUITE}-backports {' '.join(utils.mesa_packages())}")
-	_run(f"chroot {MNT} apt-get clean")
+		_apt(f"install -y -t {SUITE}-backports {' '.join(utils.mesa_packages())}")
+	_chroot("apt-get clean")
 
 
 def install_base(config: Config):
@@ -460,101 +488,77 @@ def install_base(config: Config):
 	mount_chroot_fs()
 	reset_identity()
 	if config.multiarch_i386:
-		_run(f"chroot {MNT} dpkg --add-architecture i386")
+		_chroot("dpkg --add-architecture i386")
 	install_packages(config)
 	ok("Base system installed")
 
 
 # ── System configuration ──────────────────────────────────────────────
 
-def _uuid(device):
-	return subprocess.run(["blkid", "-s", "UUID", "-o", "value", device],
-	                      capture_output=True, text=True).stdout.strip()
-
-
-def _fs_type(device):
-	return subprocess.run(["blkid", "-s", "TYPE", "-o", "value", device],
-	                      capture_output=True, text=True).stdout.strip()
-
-
 def configure_encryption(config: Config):
 	msg("Configuring encryption...")
-	lines = [f"{LUKS_ROOT} UUID={_uuid(config.layout['root']['device'])} none luks"]
+	lines = [f"{LUKS_ROOT} UUID={_blkid(config.layout['root']['device'], 'UUID')} none luks"]
 	if "swap" in config.layout:
 		os.makedirs(f"{MNT}/etc/luks", exist_ok=True)
 		shutil.copy2(SWAP_KEY_LIVE, f"{MNT}/etc/luks/swap.key")
 		os.chmod(f"{MNT}/etc/luks/swap.key", 0o600)
-		lines.append(f"{LUKS_SWAP} UUID={_uuid(config.layout['swap']['device'])} "
+		lines.append(f"{LUKS_SWAP} UUID={_blkid(config.layout['swap']['device'], 'UUID')} "
 		             f"/etc/luks/swap.key luks")
-	with open(f"{MNT}/etc/crypttab", "w") as crypttab_file:
-		crypttab_file.write("\n".join(lines) + "\n")
+	_write_target("/etc/crypttab", "\n".join(lines) + "\n")
 	with open(f"{MNT}/etc/default/grub") as grub_file:
-		grub_text = grub_file.read()
-	if "GRUB_ENABLE_CRYPTODISK=y" not in grub_text:
-		with open(f"{MNT}/etc/default/grub", "a") as grub_file:
-			grub_file.write("GRUB_ENABLE_CRYPTODISK=y\n")
+		if "GRUB_ENABLE_CRYPTODISK=y" not in grub_file.read():
+			_write_target("/etc/default/grub", "GRUB_ENABLE_CRYPTODISK=y\n", append=True)
 	ok("Encryption configured")
 
 
 def configure_snapper():
 	msg("Configuring snapper...")
-	_run(f"chroot {MNT} snapper -c root create-config /")
-	_run(f"chroot {MNT} snapper -c root create --description post-install")
+	_chroot("snapper -c root create-config /")
+	_chroot("snapper -c root create --description post-install")
 	ok("Snapper configured")
 
 
 def configure_auto_updates():
 	msg("Enabling security updates...")
-	with open(f"{MNT}/etc/apt/apt.conf.d/20auto-upgrades", "w") as periodic_file:
-		periodic_file.write('APT::Periodic::Update-Package-Lists "1";\n'
-		                    'APT::Periodic::Unattended-Upgrade "1";\n')
+	_write_target("/etc/apt/apt.conf.d/20auto-upgrades",
+	              'APT::Periodic::Update-Package-Lists "1";\n'
+	              'APT::Periodic::Unattended-Upgrade "1";\n')
 	ok("Security updates enabled")
 
 
 def configure_system(config: Config):
 	msg("Configuring system...")
 	write_fstab(config)
-
-	with open(f"{MNT}/etc/hostname", "w") as hostname_file:
-		hostname_file.write(config.hostname + "\n")
-	with open(f"{MNT}/etc/hosts", "w") as hosts_file:
-		hosts_file.write(
-			f"127.0.0.1   localhost\n"
-			f"127.0.1.1   {config.hostname}\n"
-			f"\n"
-			f"::1         localhost ip6-localhost ip6-loopback\n"
-			f"ff02::1     ip6-allnodes\n"
-			f"ff02::2     ip6-allrouters\n"
-		)
+	_write_target("/etc/hostname", config.hostname + "\n")
+	_write_target("/etc/hosts",
+	              "127.0.0.1   localhost\n"
+	              f"127.0.1.1   {config.hostname}\n"
+	              "\n"
+	              "::1         localhost ip6-localhost ip6-loopback\n"
+	              "ff02::1     ip6-allnodes\n"
+	              "ff02::2     ip6-allrouters\n")
 
 	_run(f"sed -i 's/^# *{config.locale}/{config.locale}/' {MNT}/etc/locale.gen")
-	_run(f"chroot {MNT} locale-gen")
-	with open(f"{MNT}/etc/default/locale", "w") as locale_file:
-		locale_file.write(f"LANG={config.locale}\n")
+	_chroot("locale-gen")
+	_write_target("/etc/default/locale", f"LANG={config.locale}\n")
 
-	_run(f"chroot {MNT} ln -sf /usr/share/zoneinfo/{config.timezone} /etc/localtime")
-	with open(f"{MNT}/etc/timezone", "w") as timezone_file:
-		timezone_file.write(config.timezone + "\n")
+	_chroot(f"ln -sf /usr/share/zoneinfo/{config.timezone} /etc/localtime")
+	_write_target("/etc/timezone", config.timezone + "\n")
+	_write_target("/etc/default/keyboard", keyboard_config(config.keymap))
+	_write_target("/etc/sysctl.d/99-swappiness.conf", f"vm.swappiness={config.swappiness}\n")
 
-	with open(f"{MNT}/etc/default/keyboard", "w") as keyboard_file:
-		keyboard_file.write(keyboard_config(config.keymap))
-
-	with open(f"{MNT}/etc/sysctl.d/99-swappiness.conf", "w") as swappiness_file:
-		swappiness_file.write(f"vm.swappiness={config.swappiness}\n")
-
-	_run(f"chroot {MNT} systemctl enable NetworkManager systemd-timesyncd")
+	_chroot("systemctl enable NetworkManager systemd-timesyncd")
 	copy_wifi_profiles()
-	
+
 	if config.luks:
 		configure_encryption(config)
 	if config.snapper:
 		configure_snapper()
-	
 	if config.auto_updates:
 		configure_auto_updates()
-	
+
 	msg("Rebuilding initramfs...")  # fstab and crypttab exist now
-	_run(f"chroot {MNT} update-initramfs -u -k all")
+	_chroot("update-initramfs -u -k all")
 	ok("System configured")
 
 
@@ -579,29 +583,26 @@ def copy_wifi_profiles():
 		os.chmod(target_path, 0o600)
 
 
+def _chpasswd(line):
+	subprocess.run(["chroot", MNT, "chpasswd"], input=f"{line}\n", text=True, check=True)
+
+
 def create_users(config: Config):
 	msg("Creating users...")
-	_run(f"chroot {MNT} groupadd -f lpadmin")
+	_chroot("groupadd -f lpadmin")
 	user_known = subprocess.run(["chroot", MNT, "id", config.username],
 	                            capture_output=True).returncode == 0
 	if not user_known:
-		_run(f"chroot {MNT} useradd -m -G sudo,audio,video,netdev,lpadmin "
-		     f"-s /bin/bash {config.username}")
-	subprocess.run(["chroot", MNT, "chpasswd"],
-	               input=f"{config.username}:{config.user_pass}\n",
-	               text=True, check=True)
-
+		_chroot(f"useradd -m -G sudo,audio,video,netdev,lpadmin -s /bin/bash {config.username}")
+	_chpasswd(f"{config.username}:{config.user_pass}")
 	if config.root_pass:
-		subprocess.run(["chroot", MNT, "chpasswd"],
-		               input=f"root:{config.root_pass}\n",
-		               text=True, check=True)
+		_chpasswd(f"root:{config.root_pass}")
 	else:
-		_run(f"chroot {MNT} passwd -l root")
+		_chroot("passwd -l root")
 	ok("Users created")
 
 
 # ── Desktop, window manager, optional packages ────────────────────────
-
 
 def _fetch_wm_source(repo, ref, clone_path):
 	"""Place window manager source at clone_path inside the target. Returns success."""
@@ -613,8 +614,7 @@ def _fetch_wm_source(repo, ref, clone_path):
 			return False
 		return True
 	branch = "" if ref == "-" else f"--branch {ref}"
-	return subprocess.run(f"chroot {MNT} git clone --depth 1 {branch} -- "
-	                      f"{shlex.quote(repo)} {clone_path}", shell=True).returncode == 0
+	return _chroot_ok(f"git clone --depth 1 {branch} -- {shlex.quote(repo)} {clone_path}")
 
 
 def install_window_manager(config: Config) -> bool:
@@ -632,11 +632,8 @@ def install_window_manager(config: Config) -> bool:
 		if not _fetch_wm_source(repo, ref, clone_path):
 			print(f"  {RED}{label} source unavailable.{NC}")
 			return False
-		if subprocess.run(f"chroot {MNT} bash {clone_path}/install.sh", shell=True).returncode != 0:
-			print(f"  {RED}{label} failed. Fix it from Shell, or rerun its install.sh.{NC}")
-			return False
-		ok(f"{label} installed")
-		return True
+		return _report(label, _chroot_ok(f"bash {clone_path}/install.sh"),
+		               "Fix it from Shell, or rerun its install.sh.")
 	finally:
 		_try(f"rm -rf {MNT}{clone_path}")
 
@@ -644,21 +641,15 @@ def install_window_manager(config: Config) -> bool:
 def install_extras(config: Config) -> list:
 	custom_ids = {custom_id for custom_id, *_rest in utils.custom_rows()}
 	labels = {package: label for _menu, _section, package, label, _requires in utils.extras_rows()}
-	packages = [package for package in config.hardware_packages + config.software_packages
-	            if package not in custom_ids]
 	failed = []
-	for package in packages:
-		if not utils.needs_network(package):
-			continue  # shipped in the local repo, already installed with the base packages
+	for package in config.hardware_packages + config.software_packages:
+		if package in custom_ids or not utils.needs_network(package):
+			continue  # custom scripts run separately; local-repo packages are already installed
 		label = labels.get(package, package)
 		msg(f"Installing {label}...")
-		result = subprocess.run(f"chroot {MNT} env DEBIAN_FRONTEND=noninteractive "
-		                        f"apt-get install -y {package}", shell=True)
-		if result.returncode != 0:
-			print(f"  {RED}{label} failed. Fix it from Shell, or rerun: apt-get install {package}{NC}")
+		if not _report(label, _chroot_ok(f"{APT} install -y {package}"),
+		               f"Fix it from Shell, or rerun: apt-get install {package}"):
 			failed.append(label)
-		else:
-			ok(f"{label} installed")
 	return failed
 
 
@@ -672,11 +663,9 @@ def install_custom_software(config: Config) -> list:
 		staged_path = f"{MNT}/tmp/{script}"
 		try:
 			shutil.copy2(os.path.join(utils.CUSTOM_DIR, script), staged_path)
-			if subprocess.run(f"chroot {MNT} sh /tmp/{script}", shell=True).returncode != 0:
-				print(f"  {RED}{label} failed. Fix it from Shell, or rerun the script.{NC}")
+			if not _report(label, _chroot_ok(f"sh /tmp/{script}"),
+			               "Fix it from Shell, or rerun the script."):
 				failed.append(label)
-				continue
-			ok(f"{label} installed")
 		finally:
 			_try(f"rm -f {staged_path}")
 	return failed
@@ -697,14 +686,14 @@ def _install_removable_fallback():
 def install_bootloader(config: Config):
 	msg(f"Installing bootloader ({config.boot_mode})...")
 	if config.boot_mode == "uefi":
-		_run(f"chroot {MNT} grub-install --target=x86_64-efi --efi-directory=/boot/efi "
-		     f"--bootloader-id=debian --recheck")
+		_chroot("grub-install --target=x86_64-efi --efi-directory=/boot/efi "
+		        "--bootloader-id=debian --recheck")
 		if not os.path.isfile(f"{MNT}/boot/efi/EFI/debian/shimx64.efi"):
 			die("Signed shim was not installed to the EFI partition.")
 		_install_removable_fallback()
 	else:
-		_run(f"chroot {MNT} grub-install --target=i386-pc --recheck {config.disk}")
-	_run(f"chroot {MNT} update-grub")
+		_chroot(f"grub-install --target=i386-pc --recheck {config.disk}")
+	_chroot("update-grub")
 	ok("Bootloader installed")
 
 
@@ -714,19 +703,18 @@ def configure_secure_boot(config: Config):
 	msg("Setting up Secure Boot signing...")
 	key_dir = f"{MNT}/var/lib/dkms"
 	os.makedirs(key_dir, exist_ok=True)
-	_run(f"chroot {MNT} openssl req -new -x509 -newkey rsa:2048 -nodes -days 36500 "
-	     f"-subj '/CN=DebPlus Secure Boot/' -keyout /var/lib/dkms/mok.key "
-	     f"-out /var/lib/dkms/mok.pub")
+	_chroot("openssl req -new -x509 -newkey rsa:2048 -nodes -days 36500 "
+	        "-subj '/CN=DebPlus Secure Boot/' -keyout /var/lib/dkms/mok.key "
+	        "-out /var/lib/dkms/mok.pub")
 	os.chmod(f"{key_dir}/mok.key", 0o600)
-	_run(f"chroot {MNT} openssl x509 -outform DER -in /var/lib/dkms/mok.pub "
-	     f"-out /var/lib/dkms/mok.der")
-	with open(f"{MNT}/etc/dkms/framework.conf", "a") as conf_file:
-		conf_file.write("mok_signing_key=/var/lib/dkms/mok.key\n"
-		                "mok_certificate=/var/lib/dkms/mok.pub\n")
+	_chroot("openssl x509 -outform DER -in /var/lib/dkms/mok.pub -out /var/lib/dkms/mok.der")
+	_write_target("/etc/dkms/framework.conf",
+	              "mok_signing_key=/var/lib/dkms/mok.key\n"
+	              "mok_certificate=/var/lib/dkms/mok.pub\n", append=True)
 	modules_dir = f"{MNT}/lib/modules"
 	for version in sorted(os.listdir(modules_dir)) if os.path.isdir(modules_dir) else []:
 		if os.path.isdir(f"{MNT}/usr/src/linux-headers-{version}"):
-			_run(f"chroot {MNT} dkms autoinstall -k {shlex.quote(version)}")
+			_chroot(f"dkms autoinstall -k {shlex.quote(version)}")
 	result = subprocess.run(["mokutil", "--import", f"{key_dir}/mok.der"],
 	                        input=f"{config.mok_pass}\n{config.mok_pass}\n",
 	                        text=True, capture_output=True)
@@ -742,9 +730,13 @@ def cleanup():
 	msg("Unmounting...")
 	if os.path.isdir(f"{MNT}/var/log"):
 		_try(f"cp {LOG_PATH} {MNT}/var/log/debplus-install.log")
-	_try(f"umount -Rl {MNT}")
+	_unmount(MNT, "-Rl ")
 	_try(f"rm -f {SWAP_KEY_LIVE}")
 	ok("Done")
+
+
+def _reboot():
+	subprocess.run("reboot", shell=True)
 
 
 def _open_shell():
@@ -764,6 +756,15 @@ def _choose(question, keys):
 		if reply in keys:
 			return reply
 		print("  Enter one of the letters shown.")
+
+
+def _choose_with_shell(question, keys):
+	"""Like _choose, but the 's' key opens a shell and asks again."""
+	while True:
+		choice = _choose(question, keys)
+		if choice != "s":
+			return choice
+		_open_shell()
 
 
 def _mark_done(label):
@@ -796,16 +797,12 @@ def _run_stage(index, total, label, action):
 			return
 		except Exception as error:
 			_emit(f"\n  {RED}{BOLD}Error:{NC} {label} failed: {error}", sys.stderr)
-			while True:
-				choice = _choose("(R)etry, (S)hell, Re(b)oot, or (A)bort?", "rsba")
-				if choice != "s":
-					break
-				_open_shell()
+			choice = _choose_with_shell("(R)etry, (S)hell, Re(b)oot, or (A)bort?", "rsba")
 			if choice == "r":
 				continue
 			cleanup()
 			if choice == "b":
-				subprocess.run("reboot", shell=True)
+				_reboot()
 			sys.exit(1)
 
 
@@ -847,14 +844,10 @@ def run_install(config: Config):
 		_emit(f"\n  {RED}{BOLD}Installed with errors:{NC}")
 		for failure in failures:
 			_emit(f"  {RED}- {failure}{NC}")
-		while True:
-			choice = _choose("(R)eboot, (S)hell, or (A)bort?", "rsa")
-			if choice != "s":
-				break
-			_open_shell()
+		choice = _choose_with_shell("(R)eboot, (S)hell, or (A)bort?", "rsa")
 		cleanup()
 		if choice == "r":
-			subprocess.run("reboot", shell=True)
+			_reboot()
 		return
 
 	_emit(f"\n  {GREEN}{BOLD}Installation complete!{NC}")
@@ -870,4 +863,4 @@ def run_install(config: Config):
 	if ready:
 		sys.stdin.readline()
 	cleanup()
-	subprocess.run("reboot", shell=True)
+	_reboot()
