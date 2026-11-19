@@ -2,6 +2,8 @@
 # Modifications Copyright (C) 2026 JoaquinKiko.
 # SPDX-License-Identifier: GPL-2.0-only. See COPYING and NOTICE.
 
+import glob
+import math
 import os
 import re
 import select
@@ -23,13 +25,28 @@ CYAN = "\033[0;36m"
 NC = "\033[0m"
 
 SUITE = PROFILE["SUITE"]
-KEYRING_LINE = "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"
+BACKPORTS = f"{SUITE}-backports"
+KEYRING_PATH = "/usr/share/keyrings/debian-archive-keyring.gpg"
+KEYRING_LINE = f"Signed-By: {KEYRING_PATH}"
+SECURITY_MIRROR = "http://security.debian.org/debian-security"
+EFIVARS_HOST = "/sys/firmware/efi/efivars"
+BOOT_UEFI = "uefi"
+BOOT_BIOS = "bios"
+
 PARTED_FS_HINT = {"btrfs": "btrfs", "ext4": "ext4", "xfs": "ext2"}
+MKFS_COMMANDS = {
+	"btrfs": ["mkfs.btrfs", "-f"],
+	"xfs": ["mkfs.xfs", "-f"],
+	"ext4": ["mkfs.ext4", "-qF"],
+}
 FSTAB_OPTIONS = {
 	"btrfs": "defaults,compress=zstd,noatime",
 	"ext4": "errors=remount-ro",
 	"xfs": "defaults",
 }
+FIRST_PARTITION_START = "1MiB"
+ESP_END = "513MiB"
+BIOS_BOOT_END = "2MiB"
 
 LOG_PATH = "/var/log/debplus/install.log"
 STATE_PATH = "/run/debplus/state"
@@ -40,10 +57,14 @@ LUKS_SWAP = "cryptswap"
 SWAP_KEY_LIVE = "/run/debplus/swap.key"
 
 LOCAL_REPO_MOUNT = "/media/debplus-repo"  # inside the target, only during install
-APT = "env DEBIAN_FRONTEND=noninteractive apt-get"
-# Offline apt: read only the local repo. Check-Date off because an offline RTC is often wrong.
-LOCAL_APT = ("-o Dir::Etc::sourcelist=debplus-local.list -o Dir::Etc::sourceparts=- "
-             "-o APT::Sandbox::User=root -o Acquire::Check-Date=false")
+APT_COMMAND = ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get"]
+# Offline apt reads only the local repo. Check-Date is off because an offline RTC is often wrong.
+LOCAL_APT_OPTIONS = [
+	"-o", "Dir::Etc::sourcelist=debplus-local.list",
+	"-o", "Dir::Etc::sourceparts=-",
+	"-o", "APT::Sandbox::User=root",
+	"-o", "Acquire::Check-Date=false",
+]
 
 PROGRESS_BAR_WIDTH = 40
 REBOOT_DELAY_SECONDS = 30
@@ -121,29 +142,53 @@ def die(text):
 	raise StageError(text)
 
 
-def _run(command, quiet=False):
-	result = subprocess.run(command, shell=True, capture_output=quiet, text=True)
+def _run(argv, quiet=False):
+	"""Run argv, raising StageError on failure."""
+	result = subprocess.run(argv, capture_output=quiet, text=True)
 	if result.returncode != 0:
 		detail = f"\n{result.stderr}" if quiet else ""
-		die(f"Command failed: {command}{detail}")
+		die(f"Command failed: {shlex.join(argv)}{detail}")
 	return result
 
 
-def _try(command):
-	subprocess.run(command, shell=True, capture_output=True)
+def _try(argv):
+	"""Run argv and ignore failure."""
+	subprocess.run(argv, capture_output=True)
 
 
-def _chroot(command, quiet=False):
-	return _run(f"chroot {MNT} {command}", quiet)
+def _chroot(argv, quiet=False):
+	return _run(["chroot", MNT, *argv], quiet)
 
 
-def _chroot_ok(command):
-	"""Run a chroot command and return success instead of raising."""
-	return subprocess.run(f"chroot {MNT} {command}", shell=True).returncode == 0
+def _chroot_ok(argv):
+	"""Run in the chroot with output shown, returning success instead of raising."""
+	return subprocess.run(["chroot", MNT, *argv]).returncode == 0
 
 
 def _apt(arguments, quiet=False):
-	return _chroot(f"{APT} {arguments}", quiet)
+	return _chroot([*APT_COMMAND, *arguments], quiet)
+
+
+def _unmount(path, lazy=False, recursive=False):
+	flags = (["-R"] if recursive else []) + (["-l"] if lazy else [])
+	_try(["umount", *flags, path])
+
+
+def _remove(path):
+	"""Delete a file, ignoring it if it is missing."""
+	try:
+		os.remove(path)
+	except OSError:
+		pass
+
+
+def _clear_directory(path):
+	"""Delete everything inside a directory, keeping the directory itself."""
+	for entry in glob.glob(os.path.join(path, "*")):
+		if os.path.isdir(entry) and not os.path.islink(entry):
+			shutil.rmtree(entry, ignore_errors=True)
+		else:
+			_remove(entry)
 
 
 def _report(label, succeeded, hint):
@@ -168,25 +213,15 @@ def _blkid(device, field):
 	                      capture_output=True, text=True).stdout.strip()
 
 
-def _unmount(path, flags=""):
-	"""Unmount quietly. flags carries a trailing space when given, e.g. "-l "."""
-	_try(f"umount {flags}{path}")
-
-
 # ── Partitioning ───────────────────────────────────────────────────────
 
 def _make_filesystem(device, filesystem):
-	commands = {
-		"btrfs": f"mkfs.btrfs -f {device}",
-		"xfs": f"mkfs.xfs -f {device}",
-		"ext4": f"mkfs.ext4 -qF {device}",
-	}
-	_run(commands[filesystem])
+	_run([*MKFS_COMMANDS[filesystem], device])
 
 
 def _wait_for_partitions(disk, expected, attempts=10):
 	for _ in range(attempts):
-		_try(f"partprobe {disk}")
+		_try(["partprobe", disk])
 		parts = get_partitions(disk)
 		if len(parts) >= expected:
 			return parts
@@ -195,30 +230,32 @@ def _wait_for_partitions(disk, expected, attempts=10):
 
 
 def _partition_auto(config: Config):
-	uefi = config.boot_mode == "uefi"
-	filesystem_hint = PARTED_FS_HINT[config.filesystem]
-	ram_gib = -(-utils.ram_mib() // 1024)
+	uefi = config.boot_mode == BOOT_UEFI
 	disk_mib = utils.disk_bytes(config.disk) // 2**20
 	disk_gib = disk_mib // 1024
+	ram_gib = math.ceil(utils.ram_mib() / 1024)
 	swap_gib = config.swap_gib(ram_gib, disk_gib) if config.has_swap_partition() else 0
-	swap = swap_gib > 0
 	swap_start = f"{disk_mib - swap_gib * 1024}MiB"
-	steps = ["mklabel gpt"]
+
+	parted_args = ["mklabel", "gpt"]
 	if uefi:
 		roles = ["esp", "root"]
-		steps.append("mkpart ESP fat32 1MiB 513MiB set 1 esp on")
-		root_start = "513MiB"
+		parted_args += ["mkpart", "ESP", "fat32", FIRST_PARTITION_START, ESP_END,
+		                "set", "1", "esp", "on"]
+		root_start = ESP_END
 	else:
 		roles = ["bios_grub", "root"]
-		steps.append("mkpart bios_grub 1MiB 2MiB set 1 bios_grub on")
-		root_start = "2MiB"
-	root_end = swap_start if swap else "100%"
-	steps.append(f"mkpart root {filesystem_hint} {root_start} {root_end}")
-	if swap:
+		parted_args += ["mkpart", "bios_grub", FIRST_PARTITION_START, BIOS_BOOT_END,
+		                "set", "1", "bios_grub", "on"]
+		root_start = BIOS_BOOT_END
+	root_end = swap_start if swap_gib else "100%"
+	parted_args += ["mkpart", "root", PARTED_FS_HINT[config.filesystem], root_start, root_end]
+	if swap_gib:
 		roles.append("swap")
-		steps.append(f"mkpart swap linux-swap {swap_start} 100%")
-	_run(f"wipefs -af {config.disk}", quiet=True)
-	_run(f"parted -s {config.disk} {' '.join(steps)}", quiet=True)
+		parted_args += ["mkpart", "swap", "linux-swap", swap_start, "100%"]
+
+	_run(["wipefs", "-af", config.disk], quiet=True)
+	_run(["parted", "-s", config.disk, *parted_args], quiet=True)
 	partitions = _wait_for_partitions(config.disk, len(roles))
 	config.layout = {role: {"device": device, "format": role != "bios_grub"}
 	                 for role, device in zip(roles, partitions)}
@@ -231,9 +268,9 @@ def _format_layout(config: Config):
 			continue
 		device = _device(config, role)
 		if role == "esp":
-			_run(f"mkfs.fat -F32 {device}")
+			_run(["mkfs.fat", "-F32", device])
 		elif role == "swap":
-			_run(f"mkswap {device}")
+			_run(["mkswap", device])
 		elif role in ("root", "home"):
 			_make_filesystem(device, config.filesystem)
 
@@ -243,30 +280,34 @@ def _mount_layout(config: Config):
 	btrfs = config.filesystem == "btrfs"
 	os.makedirs(MNT, exist_ok=True)
 	if btrfs:
-		_run(f"mount {root} {MNT}")
-		_run(f"btrfs subvolume create {MNT}/@")
+		_run(["mount", root, MNT])
+		_run(["btrfs", "subvolume", "create", f"{MNT}/@"])
 		if "home" not in config.layout:
-			_run(f"btrfs subvolume create {MNT}/@home")
-		_run(f"umount {MNT}")
-	subvolume_option = "-o subvol=@ " if btrfs else ""
-	_run(f"mount {subvolume_option}{root} {MNT}")
+			_run(["btrfs", "subvolume", "create", f"{MNT}/@home"])
+		_run(["umount", MNT])
+	subvolume_option = ["-o", "subvol=@"] if btrfs else []
+	_run(["mount", *subvolume_option, root, MNT])
 
 
 def mount_secondary(config: Config):
 	"""Mount /home and the ESP. Runs after extraction so the image never writes onto them."""
 	layout = config.layout
-	root = _device(config, "root")
-	home = None
-	if "home" in layout:
-		home = layout["home"]["device"]
-	elif config.filesystem == "btrfs":
-		home = f"-o subvol=@home {root}"
-	if home and not os.path.ismount(f"{MNT}/home"):
-		os.makedirs(f"{MNT}/home", exist_ok=True)
-		_run(f"mount {home} {MNT}/home")
-	if "esp" in layout and not os.path.ismount(f"{MNT}/boot/efi"):
-		os.makedirs(f"{MNT}/boot/efi", exist_ok=True)
-		_run(f"mount {layout['esp']['device']} {MNT}/boot/efi")
+	home_target = f"{MNT}/home"
+	if not os.path.ismount(home_target):
+		if "home" in layout:
+			home_source = [layout["home"]["device"]]
+		elif config.filesystem == "btrfs":
+			home_source = ["-o", "subvol=@home", _device(config, "root")]
+		else:
+			home_source = None
+		if home_source:
+			os.makedirs(home_target, exist_ok=True)
+			_run(["mount", *home_source, home_target])
+
+	esp_target = f"{MNT}/boot/efi"
+	if "esp" in layout and not os.path.ismount(esp_target):
+		os.makedirs(esp_target, exist_ok=True)
+		_run(["mount", layout["esp"]["device"], esp_target])
 
 
 def _device(config: Config, role):
@@ -287,9 +328,9 @@ def _cryptsetup(args, passphrase=None):
 
 def _close_mappers():
 	"""Release LUKS mappers left open by an earlier attempt."""
-	_try(f"swapoff /dev/mapper/{LUKS_SWAP}")
-	_try(f"cryptsetup close {LUKS_SWAP}")
-	_try(f"cryptsetup close {LUKS_ROOT}")
+	_try(["swapoff", f"/dev/mapper/{LUKS_SWAP}"])
+	_try(["cryptsetup", "close", LUKS_SWAP])
+	_try(["cryptsetup", "close", LUKS_ROOT])
 
 
 def _encrypt_layout(config: Config):
@@ -307,11 +348,11 @@ def _encrypt_layout(config: Config):
 		_cryptsetup(["luksFormat", "--type", "luks2", "--batch-mode",
 		             f"--key-file={SWAP_KEY_LIVE}", swap])
 		_cryptsetup(["open", f"--key-file={SWAP_KEY_LIVE}", swap, LUKS_SWAP])
-		_run(f"mkswap /dev/mapper/{LUKS_SWAP}")
+		_run(["mkswap", f"/dev/mapper/{LUKS_SWAP}"])
 
 
 def partition_disk(config: Config):
-	_unmount(MNT, "-Rl ")
+	_unmount(MNT, lazy=True, recursive=True)
 	_close_mappers()
 	if config.manual:
 		msg("Using selected partitions...")
@@ -357,13 +398,15 @@ def write_fstab(config: Config):
 # ── Chroot mounts ──────────────────────────────────────────────────────
 
 def mount_chroot_fs():
-	for command in (f"mount --bind /dev {MNT}/dev",
-	                f"mount --bind /dev/pts {MNT}/dev/pts",
-	                f"mount -t proc proc {MNT}/proc",
-	                f"mount -t sysfs sys {MNT}/sys"):
-		_run(command)
-	if os.path.isdir("/sys/firmware/efi/efivars"):
-		_try(f"mount --bind /sys/firmware/efi/efivars {MNT}/sys/firmware/efi/efivars")
+	for argv in (
+		["mount", "--bind", "/dev", f"{MNT}/dev"],
+		["mount", "--bind", "/dev/pts", f"{MNT}/dev/pts"],
+		["mount", "-t", "proc", "proc", f"{MNT}/proc"],
+		["mount", "-t", "sysfs", "sys", f"{MNT}/sys"],
+	):
+		_run(argv)
+	if os.path.isdir(EFIVARS_HOST):
+		_try(["mount", "--bind", EFIVARS_HOST, f"{MNT}/sys/firmware/efi/efivars"])
 
 
 # ── Apt sources ────────────────────────────────────────────────────────
@@ -374,14 +417,14 @@ def _apt_stanza(uri, suites, components):
 
 def _write_backports_pins(config: Config):
 	"""Keep backports opt-in: pin it low, then raise only the packages the user ticked."""
-	pin_blocks = [f"Package: *\nPin: release a={SUITE}-backports\nPin-Priority: 100\n"]
+	pin_blocks = [f"Package: *\nPin: release a={BACKPORTS}\nPin-Priority: 100\n"]
 	if config.backports_kernel:
 		pin_blocks.append(f"Package: linux-image-amd64 linux-headers-amd64\n"
-		                  f"Pin: release a={SUITE}-backports\nPin-Priority: 990\n")
+		                  f"Pin: release a={BACKPORTS}\nPin-Priority: 990\n")
 	if config.backports_mesa:
-		# Glob catches the Mesa libraries and drivers; libgbm1 has no "mesa" in its name
+		# Glob catches the Mesa libraries and drivers. libgbm1 has no "mesa" in its name.
 		pin_blocks.append(f"Package: *mesa* libgbm1\n"
-		                  f"Pin: release a={SUITE}-backports\nPin-Priority: 990\n")
+		                  f"Pin: release a={BACKPORTS}\nPin-Priority: 990\n")
 	os.makedirs(f"{MNT}/etc/apt/preferences.d", exist_ok=True)
 	_write_target("/etc/apt/preferences.d/backports", "\n".join(pin_blocks))
 
@@ -390,10 +433,10 @@ def write_apt_sources(config: Config):
 	components = " ".join(["main"] + config.components)
 	stanzas = [
 		_apt_stanza(MIRROR, f"{SUITE} {SUITE}-updates", components),
-		_apt_stanza("http://security.debian.org/debian-security", f"{SUITE}-security", components),
+		_apt_stanza(SECURITY_MIRROR, f"{SUITE}-security", components),
 	]
 	if config.backports_repo or config.backports_kernel or config.backports_mesa:
-		stanzas.append(_apt_stanza(MIRROR, f"{SUITE}-backports", components))
+		stanzas.append(_apt_stanza(MIRROR, BACKPORTS, components))
 		_write_backports_pins(config)
 	_write_target("/etc/apt/sources.list.d/debian.sources", "\n".join(stanzas))
 	_write_target("/etc/apt/sources.list", "")
@@ -405,10 +448,10 @@ def packages_to_install(config: Config) -> list:
 	"""Packages beyond the base image: bootloader, chosen options, shipped extras."""
 	wanted = set(utils.boot_packages(config.boot_mode))
 	wanted |= {package for package, flag in utils.optional_rows() if getattr(config, flag)}
-	if not config.backports_kernel:  # backports path installs matching headers below
+	if not config.backports_kernel:  # backports path installs matching headers later
 		wanted |= set(utils.header_packages())
-	for entry in config.hardware_packages + config.software_packages:
-		if not utils.needs_network(entry):  # shipped on the ISO. The rest go through install_extras
+	for entry in config.selected_packages():
+		if not utils.needs_network(entry):  # shipped on the ISO, so install_extras skips it
 			wanted |= set(entry.split())
 	return sorted(wanted)
 
@@ -416,18 +459,23 @@ def packages_to_install(config: Config) -> list:
 def _unmount_all():
 	"""Release chroot and secondary mounts so a retried extraction starts clean."""
 	for sub in ("sys/firmware/efi/efivars", "sys", "proc", "dev/pts", "dev", "boot/efi", "home"):
-		_unmount(f"{MNT}/{sub}", "-l ")
+		_unmount(f"{MNT}/{sub}", lazy=True)
 
 
 def reset_identity():
 	"""The image is shared by every install, so give this one its own identity."""
 	msg("Resetting machine identity...")
 	_write_target("/etc/machine-id", "")  # empty: systemd generates a new id on first boot
-	_try(f"rm -f {MNT}/var/lib/dbus/machine-id")
-	_try(f"ln -s /etc/machine-id {MNT}/var/lib/dbus/machine-id")
-	_try(f"rm -f {MNT}/etc/ssh/ssh_host_*")
-	_try(f"chroot {MNT} sh -c 'dpkg -s openssh-server >/dev/null 2>&1 && "
-	     f"dpkg-reconfigure -f noninteractive openssh-server'")
+	_remove(f"{MNT}/var/lib/dbus/machine-id")
+	try:
+		os.symlink("/etc/machine-id", f"{MNT}/var/lib/dbus/machine-id")
+	except OSError:
+		pass
+	for key in glob.glob(f"{MNT}/etc/ssh/ssh_host_*"):
+		_remove(key)
+	_try(["chroot", MNT, "sh", "-c",
+	      "dpkg -s openssh-server >/dev/null 2>&1 && "
+	      "dpkg-reconfigure -f noninteractive openssh-server"])
 
 
 def _install_from_local_repo(packages):
@@ -438,40 +486,41 @@ def _install_from_local_repo(packages):
 	msg("Installing selected packages from the install medium...")
 	mount_point = f"{MNT}{LOCAL_REPO_MOUNT}"
 	os.makedirs(mount_point, exist_ok=True)
-	_run(f"mount --bind {shlex.quote(repo)} {mount_point}")
+	_run(["mount", "--bind", repo, mount_point])
 	try:
 		_write_target("/etc/apt/debplus-local.list", f"deb [trusted=yes] file:{LOCAL_REPO_MOUNT} ./\n")
-		_apt(f"{LOCAL_APT} update", quiet=True)
-		_apt(f"{LOCAL_APT} install -y --no-install-recommends {' '.join(packages)}", quiet=True)
+		_apt([*LOCAL_APT_OPTIONS, "update"], quiet=True)
+		_apt([*LOCAL_APT_OPTIONS, "install", "-y", "--no-install-recommends", *packages], quiet=True)
 	finally:
 		_unmount(mount_point)
-		_try(f"rmdir {mount_point}")
-		_try(f"rm -f {MNT}/etc/apt/debplus-local.list")
-		_try(f"rm -rf {MNT}/var/lib/apt/lists/*")
+		_try(["rmdir", mount_point])
+		_remove(f"{MNT}/etc/apt/debplus-local.list")
+		_clear_directory(f"{MNT}/var/lib/apt/lists")
 
 
 def install_packages(config: Config):
 	"""Install the packages this install needs, then bring the system up to date if online."""
 	packages = packages_to_install(config)
-	if config.boot_mode == "bios":
+	if config.boot_mode == BOOT_BIOS:
 		# Empty install_devices keeps grub-pc from prompting. The bootloader stage installs GRUB.
-		_chroot("sh -c \"echo 'grub-pc grub-pc/install_devices string' | debconf-set-selections\"")
+		_chroot(["sh", "-c", "echo 'grub-pc grub-pc/install_devices string' | debconf-set-selections"])
 	if not config.online:
 		if packages:
 			_install_from_local_repo(packages)
 		return
+
 	msg("Updating packages...")
-	_apt("update")
+	_apt(["update"])
 	if packages:
-		_apt(f"install -y --no-install-recommends {' '.join(packages)}")
-	_apt("upgrade -y")
+		_apt(["install", "-y", "--no-install-recommends", *packages])
+	_apt(["upgrade", "-y"])
 	if config.backports_kernel:
 		msg("Installing backports kernel...")
-		_apt(f"install -y -t {SUITE}-backports linux-image-amd64 linux-headers-amd64")
+		_apt(["install", "-y", "-t", BACKPORTS, "linux-image-amd64", "linux-headers-amd64"])
 	if config.backports_mesa:
 		msg("Installing backports Mesa...")
-		_apt(f"install -y -t {SUITE}-backports {' '.join(utils.mesa_packages())}")
-	_chroot("apt-get clean")
+		_apt(["install", "-y", "-t", BACKPORTS, *utils.mesa_packages()])
+	_chroot(["apt-get", "clean"])
 
 
 def install_base(config: Config):
@@ -480,15 +529,15 @@ def install_base(config: Config):
 		die("Base system image not found on the install medium.")
 	_unmount_all()
 	msg("Extracting base system (this will take a while)...")
-	_run(f"unsquashfs -f -n -d {MNT} {shlex.quote(image)}")
-	_try(f"rm -f {MNT}/etc/resolv.conf")
+	_run(["unsquashfs", "-f", "-n", "-d", MNT, image])
+	_remove(f"{MNT}/etc/resolv.conf")
 	shutil.copy2("/etc/resolv.conf", f"{MNT}/etc/resolv.conf")
 	mount_secondary(config)
 	write_apt_sources(config)
 	mount_chroot_fs()
 	reset_identity()
 	if config.multiarch_i386:
-		_chroot("dpkg --add-architecture i386")
+		_chroot(["dpkg", "--add-architecture", "i386"])
 	install_packages(config)
 	ok("Base system installed")
 
@@ -513,8 +562,8 @@ def configure_encryption(config: Config):
 
 def configure_snapper():
 	msg("Configuring snapper...")
-	_chroot("snapper -c root create-config /")
-	_chroot("snapper -c root create --description post-install")
+	_chroot(["snapper", "-c", "root", "create-config", "/"])
+	_chroot(["snapper", "-c", "root", "create", "--description", "post-install"])
 	ok("Snapper configured")
 
 
@@ -524,6 +573,16 @@ def configure_auto_updates():
 	              'APT::Periodic::Update-Package-Lists "1";\n'
 	              'APT::Periodic::Unattended-Upgrade "1";\n')
 	ok("Security updates enabled")
+
+
+def enable_locale(locale_name):
+	"""Uncomment the chosen locale in the target's locale.gen."""
+	path = f"{MNT}/etc/locale.gen"
+	with open(path) as locale_file:
+		text = locale_file.read()
+	text = re.sub(rf"^# *{re.escape(locale_name)}", locale_name, text, flags=re.MULTILINE)
+	with open(path, "w") as locale_file:
+		locale_file.write(text)
 
 
 def configure_system(config: Config):
@@ -538,16 +597,16 @@ def configure_system(config: Config):
 	              "ff02::1     ip6-allnodes\n"
 	              "ff02::2     ip6-allrouters\n")
 
-	_run(f"sed -i 's/^# *{config.locale}/{config.locale}/' {MNT}/etc/locale.gen")
-	_chroot("locale-gen")
+	enable_locale(config.locale)
+	_chroot(["locale-gen"])
 	_write_target("/etc/default/locale", f"LANG={config.locale}\n")
 
-	_chroot(f"ln -sf /usr/share/zoneinfo/{config.timezone} /etc/localtime")
+	_chroot(["ln", "-sf", f"/usr/share/zoneinfo/{config.timezone}", "/etc/localtime"])
 	_write_target("/etc/timezone", config.timezone + "\n")
 	_write_target("/etc/default/keyboard", keyboard_config(config.keymap))
 	_write_target("/etc/sysctl.d/99-swappiness.conf", f"vm.swappiness={config.swappiness}\n")
 
-	_chroot("systemctl enable NetworkManager systemd-timesyncd")
+	_chroot(["systemctl", "enable", "NetworkManager", "systemd-timesyncd"])
 	copy_wifi_profiles()
 
 	if config.luks:
@@ -558,7 +617,7 @@ def configure_system(config: Config):
 		configure_auto_updates()
 
 	msg("Rebuilding initramfs...")  # fstab and crypttab exist now
-	_chroot("update-initramfs -u -k all")
+	_chroot(["update-initramfs", "-u", "-k", "all"])
 	ok("System configured")
 
 
@@ -589,16 +648,17 @@ def _chpasswd(line):
 
 def create_users(config: Config):
 	msg("Creating users...")
-	_chroot("groupadd -f lpadmin")
+	_chroot(["groupadd", "-f", "lpadmin"])
 	user_known = subprocess.run(["chroot", MNT, "id", config.username],
 	                            capture_output=True).returncode == 0
 	if not user_known:
-		_chroot(f"useradd -m -G sudo,audio,video,netdev,lpadmin -s /bin/bash {config.username}")
+		_chroot(["useradd", "-m", "-G", "sudo,audio,video,netdev,lpadmin",
+		         "-s", "/bin/bash", config.username])
 	_chpasswd(f"{config.username}:{config.user_pass}")
 	if config.root_pass:
 		_chpasswd(f"root:{config.root_pass}")
 	else:
-		_chroot("passwd -l root")
+		_chroot(["passwd", "-l", "root"])
 	ok("Users created")
 
 
@@ -613,8 +673,8 @@ def _fetch_wm_source(repo, ref, clone_path):
 			print(f"  {RED}Cannot copy {repo}: {error}{NC}")
 			return False
 		return True
-	branch = "" if ref == "-" else f"--branch {ref}"
-	return _chroot_ok(f"git clone --depth 1 {branch} -- {shlex.quote(repo)} {clone_path}")
+	branch = [] if ref == "-" else ["--branch", ref]
+	return _chroot_ok(["git", "clone", "--depth", "1", *branch, "--", repo, clone_path])
 
 
 def install_window_manager(config: Config) -> bool:
@@ -632,29 +692,29 @@ def install_window_manager(config: Config) -> bool:
 		if not _fetch_wm_source(repo, ref, clone_path):
 			print(f"  {RED}{label} source unavailable.{NC}")
 			return False
-		return _report(label, _chroot_ok(f"bash {clone_path}/install.sh"),
+		return _report(label, _chroot_ok(["bash", f"{clone_path}/install.sh"]),
 		               "Fix it from Shell, or rerun its install.sh.")
 	finally:
-		_try(f"rm -rf {MNT}{clone_path}")
+		_try(["rm", "-rf", f"{MNT}{clone_path}"])
 
 
 def install_extras(config: Config) -> list:
 	custom_ids = {custom_id for custom_id, *_rest in utils.custom_rows()}
 	labels = {package: label for _menu, _section, package, label, _requires in utils.extras_rows()}
 	failed = []
-	for package in config.hardware_packages + config.software_packages:
+	for package in config.selected_packages():
 		if package in custom_ids or not utils.needs_network(package):
 			continue  # custom scripts run separately; local-repo packages are already installed
 		label = labels.get(package, package)
 		msg(f"Installing {label}...")
-		if not _report(label, _chroot_ok(f"{APT} install -y {package}"),
+		if not _report(label, _chroot_ok([*APT_COMMAND, "install", "-y", package]),
 		               f"Fix it from Shell, or rerun: apt-get install {package}"):
 			failed.append(label)
 	return failed
 
 
 def install_custom_software(config: Config) -> list:
-	selected = set(config.hardware_packages + config.software_packages)
+	selected = set(config.selected_packages())
 	failed = []
 	for custom_id, _menu, _section, label, script, _requirement in utils.custom_rows():
 		if custom_id not in selected:
@@ -663,11 +723,11 @@ def install_custom_software(config: Config) -> list:
 		staged_path = f"{MNT}/tmp/{script}"
 		try:
 			shutil.copy2(os.path.join(utils.CUSTOM_DIR, script), staged_path)
-			if not _report(label, _chroot_ok(f"sh /tmp/{script}"),
+			if not _report(label, _chroot_ok(["sh", f"/tmp/{script}"]),
 			               "Fix it from Shell, or rerun the script."):
 				failed.append(label)
 		finally:
-			_try(f"rm -f {staged_path}")
+			_remove(staged_path)
 	return failed
 
 
@@ -675,25 +735,25 @@ def install_custom_software(config: Config) -> list:
 
 def _install_removable_fallback():
 	"""Copy shim and GRUB to EFI/BOOT so the disk boots if firmware drops its NVRAM entry."""
-	source = f"{MNT}/boot/efi/EFI/debian"
-	target = f"{MNT}/boot/efi/EFI/BOOT"
-	os.makedirs(target, exist_ok=True)
-	shutil.copy2(f"{source}/shimx64.efi", f"{target}/BOOTX64.EFI")
+	source_dir = f"{MNT}/boot/efi/EFI/debian"
+	target_dir = f"{MNT}/boot/efi/EFI/BOOT"
+	os.makedirs(target_dir, exist_ok=True)
+	shutil.copy2(f"{source_dir}/shimx64.efi", f"{target_dir}/BOOTX64.EFI")
 	for name in ("grubx64.efi", "mmx64.efi"):
-		shutil.copy2(f"{source}/{name}", f"{target}/{name}")
+		shutil.copy2(f"{source_dir}/{name}", f"{target_dir}/{name}")
 
 
 def install_bootloader(config: Config):
 	msg(f"Installing bootloader ({config.boot_mode})...")
-	if config.boot_mode == "uefi":
-		_chroot("grub-install --target=x86_64-efi --efi-directory=/boot/efi "
-		        "--bootloader-id=debian --recheck")
+	if config.boot_mode == BOOT_UEFI:
+		_chroot(["grub-install", "--target=x86_64-efi", "--efi-directory=/boot/efi",
+		         "--bootloader-id=debian", "--recheck"])
 		if not os.path.isfile(f"{MNT}/boot/efi/EFI/debian/shimx64.efi"):
 			die("Signed shim was not installed to the EFI partition.")
 		_install_removable_fallback()
 	else:
-		_chroot(f"grub-install --target=i386-pc --recheck {config.disk}")
-	_chroot("update-grub")
+		_chroot(["grub-install", "--target=i386-pc", "--recheck", config.disk])
+	_chroot(["update-grub"])
 	ok("Bootloader installed")
 
 
@@ -703,18 +763,24 @@ def configure_secure_boot(config: Config):
 	msg("Setting up Secure Boot signing...")
 	key_dir = f"{MNT}/var/lib/dkms"
 	os.makedirs(key_dir, exist_ok=True)
-	_chroot("openssl req -new -x509 -newkey rsa:2048 -nodes -days 36500 "
-	        "-subj '/CN=DebPlus Secure Boot/' -keyout /var/lib/dkms/mok.key "
-	        "-out /var/lib/dkms/mok.pub")
+	_chroot(["openssl", "req", "-new", "-x509", "-newkey", "rsa:2048", "-nodes",
+	         "-days", "36500", "-subj", "/CN=DebPlus Secure Boot/",
+	         "-keyout", "/var/lib/dkms/mok.key", "-out", "/var/lib/dkms/mok.pub"])
 	os.chmod(f"{key_dir}/mok.key", 0o600)
-	_chroot("openssl x509 -outform DER -in /var/lib/dkms/mok.pub -out /var/lib/dkms/mok.der")
+	_chroot(["openssl", "x509", "-outform", "DER",
+	         "-in", "/var/lib/dkms/mok.pub", "-out", "/var/lib/dkms/mok.der"])
+
+	os.makedirs(f"{MNT}/etc/dkms", exist_ok=True)  # may be absent if DKMS is not yet installed
 	_write_target("/etc/dkms/framework.conf",
 	              "mok_signing_key=/var/lib/dkms/mok.key\n"
 	              "mok_certificate=/var/lib/dkms/mok.pub\n", append=True)
+
 	modules_dir = f"{MNT}/lib/modules"
-	for version in sorted(os.listdir(modules_dir)) if os.path.isdir(modules_dir) else []:
+	kernel_versions = sorted(os.listdir(modules_dir)) if os.path.isdir(modules_dir) else []
+	for version in kernel_versions:
 		if os.path.isdir(f"{MNT}/usr/src/linux-headers-{version}"):
-			_chroot(f"dkms autoinstall -k {shlex.quote(version)}")
+			_chroot(["dkms", "autoinstall", "-k", version])
+
 	result = subprocess.run(["mokutil", "--import", f"{key_dir}/mok.der"],
 	                        input=f"{config.mok_pass}\n{config.mok_pass}\n",
 	                        text=True, capture_output=True)
@@ -729,14 +795,17 @@ def cleanup():
 	PROGRESS.stop()
 	msg("Unmounting...")
 	if os.path.isdir(f"{MNT}/var/log"):
-		_try(f"cp {LOG_PATH} {MNT}/var/log/debplus-install.log")
-	_unmount(MNT, "-Rl ")
-	_try(f"rm -f {SWAP_KEY_LIVE}")
+		try:
+			shutil.copy2(LOG_PATH, f"{MNT}/var/log/debplus-install.log")
+		except OSError:
+			pass
+	_unmount(MNT, lazy=True, recursive=True)
+	_remove(SWAP_KEY_LIVE)
 	ok("Done")
 
 
 def _reboot():
-	subprocess.run("reboot", shell=True)
+	subprocess.run(["reboot"])
 
 
 def _open_shell():
@@ -808,7 +877,7 @@ def _run_stage(index, total, label, action):
 
 def run_install(config: Config):
 	_clear_screen()
-	_try(f"hostname {config.hostname}")
+	_try(["hostname", config.hostname])
 	failures = []
 
 	def desktop_stage():

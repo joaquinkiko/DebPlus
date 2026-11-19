@@ -12,29 +12,50 @@ WORK_DIR="$SCRIPT_DIR/.iso-work"
 ROOTFS_DIR="$WORK_DIR/rootfs"
 TARGET_DIR="$WORK_DIR/target"
 ISO_DIR="$WORK_DIR/iso"
-BUILD_DATE="$(date +%Y%m%d)"
-ISO_OUTPUT="$SCRIPT_DIR/${PROFILE_SLUG}-${SUITE}-${BUILD_DATE}.iso"
+REPO_DIR="$ISO_DIR/install/repo"
+PAYLOAD_DIR="$ROOTFS_DIR/opt/debplus"
+ISO_OUTPUT="$SCRIPT_DIR/${PROFILE_SLUG}-${SUITE}-$(date +%Y%m%d).iso"
 KEYRING=/usr/share/keyrings/debian-archive-keyring.gpg
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 msg() { echo ":: $*"; }
 
+# ── Mounts ─────────────────────────────────────────────────────────────
+
 cleanup_mounts() {
-	for mount_point in "$ROOTFS_DIR/dev/pts" "$ROOTFS_DIR/dev" "$ROOTFS_DIR/proc" "$ROOTFS_DIR/sys" \
-	                   "$TARGET_DIR/dev/pts" "$TARGET_DIR/dev" "$TARGET_DIR/proc" "$TARGET_DIR/sys"; do
-		umount -lf "$mount_point" 2>/dev/null || true
+	local root_dir mount_point
+	for root_dir in "$ROOTFS_DIR" "$TARGET_DIR"; do
+		for mount_point in "$root_dir/dev/pts" "$root_dir/dev" "$root_dir/proc" "$root_dir/sys"; do
+			umount -lf "$mount_point" 2>/dev/null || true
+		done
 	done
 }
-trap cleanup_mounts EXIT
+
+mount_chroot_fs() {
+	local root_dir="$1"
+	mount --bind /dev "$root_dir/dev"
+	mount --bind /dev/pts "$root_dir/dev/pts"
+	mount -t proc proc "$root_dir/proc"
+	mount -t sysfs sys "$root_dir/sys"
+}
+
+assert_no_active_mounts() {
+	cleanup_mounts
+	if findmnt -rno TARGET | grep -qF "$WORK_DIR/"; then
+		die "Mounts still active under $WORK_DIR, unmount them before rebuilding"
+	fi
+}
+
+# ── Preflight ──────────────────────────────────────────────────────────
 
 preflight() {
 	local -a problems=()
-	local cmd pkg var f
+	local command_name variable_name relative_path directory free_kilobytes
 
 	[[ $EUID -eq 0 ]] || die "Must be run as root"
 
 	# command -> package that provides it
-	local -A cmd_pkg=(
+	local -A command_packages=(
 		[debootstrap]=debootstrap
 		[xorriso]=xorriso
 		[mksquashfs]=squashfs-tools
@@ -46,36 +67,32 @@ preflight() {
 		[umount]=mount
 		[chroot]=coreutils
 	)
-	for cmd in "${!cmd_pkg[@]}"; do
-		command -v "$cmd" >/dev/null 2>&1 || problems+=("missing command '$cmd' (apt install ${cmd_pkg[$cmd]})")
+	for command_name in "${!command_packages[@]}"; do
+		command -v "$command_name" >/dev/null 2>&1 ||
+			problems+=("missing command '$command_name' (apt install ${command_packages[$command_name]})")
 	done
 
-	# Keyring, GRUB modules
 	[ -f "$KEYRING" ] || problems+=("missing $KEYRING (apt install debian-archive-keyring)")
 	[ -d /usr/lib/grub/i386-pc ] || problems+=("missing GRUB BIOS modules (apt install grub-pc-bin)")
 	[ -d /usr/lib/grub/x86_64-efi ] || problems+=("missing GRUB UEFI modules (apt install grub-efi-amd64-bin)")
 
-	# profile.env variables
-	for var in PROFILE_SLUG SUITE MIRROR ISO_LABEL; do
-		[ -n "${!var:-}" ] || problems+=("profile.env does not set $var")
+	for variable_name in PROFILE_SLUG SUITE MIRROR ISO_LABEL; do
+		[ -n "${!variable_name:-}" ] || problems+=("profile.env does not set $variable_name")
 	done
 
-	# Input files and directories
-	for f in packages/live.list packages/target.list packages/boot.list \
-		packages/optional.list packages/headers.list packages/dkms.list packages/mesa.list \
+	for relative_path in packages/{live,target,boot,optional,headers,dkms,mesa}.list \
 		options/extras.list profile.env; do
-		[ -f "$SCRIPT_DIR/$f" ] || problems+=("missing file $f")
+		[ -f "$SCRIPT_DIR/$relative_path" ] || problems+=("missing file $relative_path")
 	done
-	for f in installer options/custom options/wm; do
-		[ -d "$SCRIPT_DIR/$f" ] || problems+=("missing directory $f")
+	for directory in installer options/custom options/wm; do
+		[ -d "$SCRIPT_DIR/$directory" ] || problems+=("missing directory $directory")
 	done
 	compgen -G "$SCRIPT_DIR/options/*.list" >/dev/null || problems+=("no options/*.list files found")
 	[ -f /etc/resolv.conf ] || problems+=("host has no /etc/resolv.conf (needed for chroot networking)")
 
-	# Disk space (two rootfs trees + squashfs images + ISO), ~10 GiB to be safe
-	local free_kb
-	free_kb="$(df --output=avail -k "$SCRIPT_DIR" | tail -n1 | tr -d ' ')"
-	(( free_kb >= 10 * 1024 * 1024 )) || problems+=("less than 10 GiB free in $SCRIPT_DIR")
+	# Two rootfs trees, squashfs images and ISO: ~10 GiB to be safe
+	free_kilobytes="$(df --output=avail -k "$SCRIPT_DIR" | tail -n1 | tr -d ' ')"
+	(( free_kilobytes >= 10 * 1024 * 1024 )) || problems+=("less than 10 GiB free in $SCRIPT_DIR")
 
 	if (( ${#problems[@]} )); then
 		echo "ERROR: preflight failed:" >&2
@@ -83,49 +100,92 @@ preflight() {
 		exit 1
 	fi
 }
-preflight
 
-cleanup_mounts
-if findmnt -rno TARGET | grep -qF "$WORK_DIR/"; then
-	die "Mounts still active under $WORK_DIR, unmount them before rebuilding"
-fi
-rm -rf "$WORK_DIR"
-mkdir -p "$ROOTFS_DIR" "$TARGET_DIR" "$ISO_DIR/boot/grub" "$ISO_DIR/live" "$ISO_DIR/install/repo"
+# ── Package list helpers ───────────────────────────────────────────────
 
-msg "Debootstrapping live environment..."
-debootstrap --arch=amd64 --variant=minbase \
-	--keyring=/usr/share/keyrings/debian-archive-keyring.gpg \
-	"$SUITE" "$ROOTFS_DIR" "$MIRROR"
+pkg_list() { grep -hEv '^[[:space:]]*(#|$)' "$@" || true; }
 
-mount --bind /dev "$ROOTFS_DIR/dev"
-mount --bind /dev/pts "$ROOTFS_DIR/dev/pts"
-mount -t proc proc "$ROOTFS_DIR/proc"
-mount -t sysfs sys "$ROOTFS_DIR/sys"
+optional_names() {
+	awk -F'|' '!/^[[:space:]]*#/ && NF { gsub(/[ \t]/, "", $1); if ($1) print $1 }' "$1"
+}
 
-cp "$SCRIPT_DIR/packages/live.list" "$ROOTFS_DIR/tmp/live.list"
+baked_extras() {
+	awk -F'|' '/^[[:space:]]*#/ || NF < 6 { next }
+		{ gsub(/^[ \t]+|[ \t]+$/, "", $6); if ($6 == "bake") print $3 }' "$1"
+}
 
-cat > "$ROOTFS_DIR/tmp/setup.sh" << 'SETUP'
-#!/bin/bash
-set -e
-export DEBIAN_FRONTEND=noninteractive
+boot_set() {
+	awk -F'|' -v mode="$1" '/^[[:space:]]*#/ || NF < 2 { next }
+		{ gsub(/^[ \t]+|[ \t]+$/, "", $1); if ($1 == mode) print $2 }' "$SCRIPT_DIR/packages/boot.list"
+}
 
-cat > /etc/apt/sources.list.d/debian.sources << SOURCES
+word_list() { tr -s ' ' '\n' | sed '/^$/d' | sort -u; }
+
+# ── Chroot helpers ─────────────────────────────────────────────────────
+
+write_apt_sources() {
+	local root_dir="$1"
+	cat > "$root_dir/etc/apt/sources.list.d/debian.sources" << SOURCES
 Types: deb
 URIs: $MIRROR
 Suites: $SUITE $SUITE-updates
 Components: main contrib non-free-firmware non-free
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+Signed-By: $KEYRING
 
 Types: deb
 URIs: http://security.debian.org/debian-security
 Suites: $SUITE-security
 Components: main contrib non-free-firmware non-free
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+Signed-By: $KEYRING
 SOURCES
-: > /etc/apt/sources.list
+	: > "$root_dir/etc/apt/sources.list"
+}
+
+# Reads a setup script from stdin, runs it in the chroot with networking, then clears resolv.conf.
+run_setup_in_chroot() {
+	local root_dir="$1"
+	write_apt_sources "$root_dir"
+	cat > "$root_dir/tmp/setup.sh"
+	chmod +x "$root_dir/tmp/setup.sh"
+	rm -f "$root_dir/etc/resolv.conf"
+	cp /etc/resolv.conf "$root_dir/etc/resolv.conf"
+	chroot "$root_dir" /tmp/setup.sh
+	: > "$root_dir/etc/resolv.conf"
+	rm -f "$root_dir/tmp/setup.sh"
+}
+
+make_squashfs() {
+	local source_path="$1" output_path="$2" compression_level="$3"
+	mksquashfs "$source_path" "$output_path" -comp zstd -Xcompression-level "$compression_level" \
+		-noappend -quiet
+}
+
+latest_file() { printf '%s\n' "$@" | sort -V | tail -n1; }
+
+# ── Live environment ───────────────────────────────────────────────────
+
+install_installer_payload() {
+	install -d "$PAYLOAD_DIR/packages" "$PAYLOAD_DIR/options"
+	install -m644 "$SCRIPT_DIR"/packages/*.list "$PAYLOAD_DIR/packages/"
+	install -m644 "$SCRIPT_DIR/profile.env" "$PAYLOAD_DIR/"
+	install -m644 "$SCRIPT_DIR"/options/*.list "$PAYLOAD_DIR/options/"
+	cp -a "$SCRIPT_DIR/installer" "$PAYLOAD_DIR/"
+	cp -a "$SCRIPT_DIR/options/custom" "$SCRIPT_DIR/options/wm" "$PAYLOAD_DIR/options/"
+}
+
+build_live_rootfs() {
+	msg "Debootstrapping live environment..."
+	debootstrap --arch=amd64 --variant=minbase --keyring="$KEYRING" "$SUITE" "$ROOTFS_DIR" "$MIRROR"
+	mount_chroot_fs "$ROOTFS_DIR"
+	pkg_list "$SCRIPT_DIR/packages/live.list" | word_list > "$ROOTFS_DIR/tmp/live.pkgs"
+
+	run_setup_in_chroot "$ROOTFS_DIR" << 'SETUP'
+#!/bin/bash
+set -e
+export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
-apt-get install -y --no-install-recommends $(grep -v '^#' /tmp/live.list)
+apt-get install -y --no-install-recommends $(cat /tmp/live.pkgs)
 
 echo "debplus-live" > /etc/hostname
 systemctl enable NetworkManager
@@ -159,63 +219,32 @@ apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/*
 SETUP
 
-chmod +x "$ROOTFS_DIR/tmp/setup.sh"
-cp /etc/resolv.conf "$ROOTFS_DIR/etc/resolv.conf"
-chroot "$ROOTFS_DIR" env MIRROR="$MIRROR" SUITE="$SUITE" /tmp/setup.sh
-: > "$ROOTFS_DIR/etc/resolv.conf"
-rm -f "$ROOTFS_DIR/tmp/setup.sh" "$ROOTFS_DIR/tmp/live.list"
-
-msg "Installing DebPlus into the live environment..."
-install -d "$ROOTFS_DIR/opt/debplus/packages"
-install -m644 "$SCRIPT_DIR"/packages/*.list "$ROOTFS_DIR/opt/debplus/packages/"
-cp -a "$SCRIPT_DIR/installer" "$ROOTFS_DIR/opt/debplus/"
-install -d "$ROOTFS_DIR/opt/debplus/options"
-install -m644 "$SCRIPT_DIR/profile.env" "$ROOTFS_DIR/opt/debplus/"
-install -m644 "$SCRIPT_DIR"/options/*.list "$ROOTFS_DIR/opt/debplus/options/"
-cp -a "$SCRIPT_DIR/options/custom" "$ROOTFS_DIR/opt/debplus/options/"
-cp -a "$SCRIPT_DIR/options/wm" "$ROOTFS_DIR/opt/debplus/options/"
-
-cleanup_mounts
-
-# ── Base system image and local package repo ──
-# target.squashfs holds only target.list. Everything optional (bootloaders, LUKS, snapper,
-# zram, auto-updates, firmware, extras.list rows flagged "bake") is downloaded as .debs into
-# a flat apt repo on the ISO, and the installer installs just what was selected, offline if
-# need be. Both live in install/, outside live/, so live-boot does not layer them.
-pkg_list() { grep -hEv '^[[:space:]]*(#|$)' "$@" || true; }
-optional_names() {
-	awk -F'|' '!/^[[:space:]]*#/ && NF { gsub(/[ \t]/, "", $1); if ($1) print $1 }' "$1"
+	install_installer_payload
+	cleanup_mounts
 }
-baked_extras() {
-	awk -F'|' '/^[[:space:]]*#/ || NF < 6 { next }
-		{ gsub(/^[ \t]+|[ \t]+$/, "", $6); if ($6 == "bake") print $3 }' "$1"
-}
-boot_set() {
-	awk -F'|' -v mode="$1" '/^[[:space:]]*#/ || NF < 2 { next }
-		{ gsub(/^[ \t]+|[ \t]+$/, "", $1); if ($1 == mode) print $2 }' "$SCRIPT_DIR/packages/boot.list"
-}
-word_list() { tr -s ' ' '\n' | sed '/^$/d' | sort -u; }
 
-msg "Debootstrapping base system image..."
-debootstrap --arch=amd64 --variant=minbase --components=main,contrib,non-free-firmware \
-	--keyring="$KEYRING" "$SUITE" "$TARGET_DIR" "$MIRROR"
+# ── Base system image and local package repo ───────────────────────────
+# target.squashfs holds only target.list. Everything optional is downloaded as .debs into a
+# flat apt repo on the ISO, and the installer installs just what was selected, offline if need be.
+# Both live in install/, outside live/, so live-boot does not layer them.
 
-mount --bind /dev "$TARGET_DIR/dev"
-mount --bind /dev/pts "$TARGET_DIR/dev/pts"
-mount -t proc proc "$TARGET_DIR/proc"
-mount -t sysfs sys "$TARGET_DIR/sys"
+build_base_image() {
+	msg "Debootstrapping base system image..."
+	debootstrap --arch=amd64 --variant=minbase --components=main,contrib,non-free-firmware \
+		--keyring="$KEYRING" "$SUITE" "$TARGET_DIR" "$MIRROR"
+	mount_chroot_fs "$TARGET_DIR"
 
-pkg_list "$SCRIPT_DIR/packages/target.list" | word_list > "$TARGET_DIR/tmp/base.pkgs"
-# BIOS and UEFI sets are downloaded separately because grub-pc conflicts with the UEFI stack
-{
-	optional_names "$SCRIPT_DIR/packages/optional.list"
-	pkg_list "$SCRIPT_DIR/packages/headers.list"
-	baked_extras "$SCRIPT_DIR/options/extras.list"
-} | word_list > "$TARGET_DIR/tmp/common.pkgs"
-boot_set uefi | word_list > "$TARGET_DIR/tmp/uefi.pkgs"
-boot_set bios | word_list > "$TARGET_DIR/tmp/bios.pkgs"
+	pkg_list "$SCRIPT_DIR/packages/target.list" | word_list > "$TARGET_DIR/tmp/base.pkgs"
+	# BIOS and UEFI sets are downloaded separately because grub-pc conflicts with the UEFI stack
+	{
+		optional_names "$SCRIPT_DIR/packages/optional.list"
+		pkg_list "$SCRIPT_DIR/packages/headers.list"
+		baked_extras "$SCRIPT_DIR/options/extras.list"
+	} | word_list > "$TARGET_DIR/tmp/common.pkgs"
+	boot_set uefi | word_list > "$TARGET_DIR/tmp/uefi.pkgs"
+	boot_set bios | word_list > "$TARGET_DIR/tmp/bios.pkgs"
 
-cat > "$TARGET_DIR/tmp/setup.sh" << 'SETUP'
+	run_setup_in_chroot "$TARGET_DIR" << 'SETUP'
 #!/bin/bash
 set -e
 export DEBIAN_FRONTEND=noninteractive
@@ -224,28 +253,13 @@ export DEBIAN_FRONTEND=noninteractive
 printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d
 chmod +x /usr/sbin/policy-rc.d
 
-cat > /etc/apt/sources.list.d/debian.sources << SOURCES
-Types: deb
-URIs: $MIRROR
-Suites: $SUITE $SUITE-updates
-Components: main contrib non-free-firmware non-free
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-
-Types: deb
-URIs: http://security.debian.org/debian-security
-Suites: $SUITE-security
-Components: main contrib non-free-firmware non-free
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-SOURCES
-: > /etc/apt/sources.list
-
 apt-get update
 apt-get install -y --no-install-recommends $(cat /tmp/base.pkgs)
 
 # From here the apt cache must hold only what goes into the repo
 apt-get clean
-for set in common uefi bios; do
-	apt-get install -y --download-only --no-install-recommends $(cat /tmp/$set.pkgs)
+for package_set in common uefi bios; do
+	apt-get install -y --download-only --no-install-recommends $(cat /tmp/$package_set.pkgs)
 done
 
 # Per-install identity is created by the installer
@@ -254,76 +268,98 @@ rm -f /usr/sbin/policy-rc.d
 rm -f /var/lib/dbus/machine-id /etc/ssh/ssh_host_*
 rm -rf /var/lib/apt/lists/* /tmp/*
 SETUP
+	cleanup_mounts
+}
 
-chmod +x "$TARGET_DIR/tmp/setup.sh"
-rm -f "$TARGET_DIR/etc/resolv.conf"
-cp /etc/resolv.conf "$TARGET_DIR/etc/resolv.conf"
-chroot "$TARGET_DIR" env MIRROR="$MIRROR" SUITE="$SUITE" /tmp/setup.sh
-rm -f "$TARGET_DIR/etc/resolv.conf"
-: > "$TARGET_DIR/etc/resolv.conf"
-cleanup_mounts
+build_local_repo() {
+	msg "Building local package repo..."
+	mv "$TARGET_DIR"/var/cache/apt/archives/*.deb "$REPO_DIR/"
+	(
+		cd "$REPO_DIR"
+		dpkg-scanpackages --multiversion . /dev/null > Packages 2>/dev/null
+		[ -s Packages ] || die "dpkg-scanpackages produced no index"
+		gzip -9k Packages
+		# The installer runs apt with Check-Date off, so a wrong offline clock cannot reject this
+		{
+			echo "Origin: DebPlus"
+			echo "Date: $(date -Ru)"
+			echo "Label: DebPlus"
+			echo "Architectures: amd64"
+			echo "SHA256:"
+			for index_file in Packages Packages.gz; do
+				printf ' %s %s %s\n' "$(sha256sum "$index_file" | cut -d' ' -f1)" \
+					"$(stat -c %s "$index_file")" "$index_file"
+			done
+		} > Release
+	)
+	msg "Repo holds $(ls "$REPO_DIR"/*.deb | wc -l) packages"
+}
 
-msg "Building local package repo..."
-REPO_DIR="$ISO_DIR/install/repo"
-cp "$TARGET_DIR"/var/cache/apt/archives/*.deb "$REPO_DIR/"
-rm -f "$TARGET_DIR"/var/cache/apt/archives/*.deb
-(
-	cd "$REPO_DIR"
-	dpkg-scanpackages --multiversion . /dev/null > Packages 2>/dev/null
-	[ -s Packages ] || { echo "ERROR: dpkg-scanpackages produced no index" >&2; exit 1; }
-	gzip -9k Packages
-	# The installer runs apt with Check-Date off, so a wrong offline clock cannot reject this
+# ── Boot files and ISO ─────────────────────────────────────────────────
+
+copy_boot_files() {
+	msg "Copying kernel and initrd..."
+	cp "$(latest_file "$ROOTFS_DIR"/boot/vmlinuz-*)" "$ISO_DIR/boot/vmlinuz"
+	cp "$(latest_file "$ROOTFS_DIR"/boot/initrd.img-*)" "$ISO_DIR/boot/initrd.img"
+}
+
+menu_entry() {
+	local title="$1" extra_args="${2:-}"
+	printf 'menuentry "%s" {\n    linux /boot/vmlinuz boot=live%s\n    initrd /boot/initrd.img\n}\n\n' \
+		"$title" "${extra_args:+ $extra_args}"
+}
+
+write_grub_config() {
 	{
-		echo "Origin: DebPlus"
-		echo "Date: $(date -Ru)"
-		echo "Label: DebPlus"
-		echo "Architectures: amd64"
-		echo "SHA256:"
-		for index in Packages Packages.gz; do
-			printf ' %s %s %s\n' "$(sha256sum "$index" | cut -d' ' -f1)" "$(stat -c %s "$index")" "$index"
-		done
-	} > Release
-)
-msg "Repo holds $(ls "$REPO_DIR"/*.deb | wc -l) packages"
-
-msg "Creating base system squashfs (this takes a while)..."
-mksquashfs "$TARGET_DIR" "$ISO_DIR/install/target.squashfs" \
-	-comp zstd -Xcompression-level 19 -noappend -quiet
-rm -rf "$TARGET_DIR"
-
-msg "Creating squashfs (this takes a while)..."
-mksquashfs "$ROOTFS_DIR" "$ISO_DIR/live/filesystem.squashfs" \
-	-comp zstd -Xcompression-level 22 -noappend -quiet
-
-msg "Copying kernel and initrd..."
-kernel_file="$(ls -1 "$ROOTFS_DIR"/boot/vmlinuz-* | sort -V | tail -n1)"
-initrd_file="$(ls -1 "$ROOTFS_DIR"/boot/initrd.img-* | sort -V | tail -n1)"
-cp "$kernel_file" "$ISO_DIR/boot/vmlinuz"
-cp "$initrd_file" "$ISO_DIR/boot/initrd.img"
-
-cat > "$ISO_DIR/boot/grub/grub.cfg" << 'GRUB'
-set default=0
-set timeout=2
-
-menuentry "DebPlus Installer" {
-    linux /boot/vmlinuz boot=live
-    initrd /boot/initrd.img
+		echo "set default=0"
+		echo "set timeout=2"
+		echo
+		menu_entry "$PROFILE_NAME Installer"
+		menu_entry "$PROFILE_NAME Installer (safe graphics)" nomodeset
+	} > "$ISO_DIR/boot/grub/grub.cfg"
 }
 
-menuentry "DebPlus Installer (safe graphics)" {
-    linux /boot/vmlinuz boot=live nomodeset
-    initrd /boot/initrd.img
+build_iso() {
+	msg "Building ISO..."
+	grub-mkrescue -o "$ISO_OUTPUT" "$ISO_DIR" \
+		-- -volid "$ISO_LABEL" \
+		-boot_image any mbr_force_bootable=on
 }
-GRUB
 
-msg "Building ISO..."
-grub-mkrescue -o "$ISO_OUTPUT" "$ISO_DIR" \
-	-- -volid "$ISO_LABEL" \
-	-boot_image any mbr_force_bootable=on
+# ── Main ───────────────────────────────────────────────────────────────
 
-cleanup_mounts
-if findmnt -rno TARGET | grep -qF "$WORK_DIR/"; then
-	die "Mounts still active under $WORK_DIR, unmount them before rebuilding"
-fi
-rm -rf "$WORK_DIR"
-echo "Built: $ISO_OUTPUT"
+main() {
+	preflight
+	assert_no_active_mounts
+	rm -rf "$WORK_DIR"
+	mkdir -p "$ROOTFS_DIR" "$TARGET_DIR" "$ISO_DIR/boot/grub" "$ISO_DIR/live" "$REPO_DIR"
+
+	build_live_rootfs
+	build_base_image
+	build_local_repo
+
+	msg "Creating base system and live squashfs in parallel (this takes a while)..."
+	make_squashfs "$TARGET_DIR" "$ISO_DIR/install/target.squashfs" 19 &
+	target_pid=$!
+	make_squashfs "$ROOTFS_DIR" "$ISO_DIR/live/filesystem.squashfs" 19 &
+	live_pid=$!
+
+	target_status=0
+	live_status=0
+	wait "$target_pid" || target_status=$?
+	wait "$live_pid" || live_status=$?
+	(( target_status == 0 && live_status == 0 )) ||
+		die "squashfs build failed (target: $target_status, live: $live_status)"
+	rm -rf "$TARGET_DIR"
+
+	copy_boot_files
+	write_grub_config
+	build_iso
+
+	assert_no_active_mounts
+	rm -rf "$WORK_DIR"
+	echo "Built: $ISO_OUTPUT"
+}
+
+trap cleanup_mounts EXIT
+main "$@"

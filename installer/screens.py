@@ -12,22 +12,10 @@ from . import utils
 from .widgets import Selectable, SubmitEdit
 
 KEYMAP_CHOICES = {
-	"us": "English (US)",
-	"gb": "English (UK)",
-	"de": "German",
-	"fr": "French",
-	"es": "Spanish",
-	"it": "Italian",
-	"pt": "Portuguese",
-	"br": "Portuguese (Brazil)",
-	"ru": "Russian",
-	"pl": "Polish",
-	"se": "Swedish",
-	"no": "Norwegian",
-	"fi": "Finnish",
-	"dk": "Danish",
-	"ch": "German (Switzerland)",
-	"jp": "Japanese",
+	"us": "English (US)", "gb": "English (UK)", "de": "German", "fr": "French",
+	"es": "Spanish", "it": "Italian", "pt": "Portuguese", "br": "Portuguese (Brazil)",
+	"ru": "Russian", "pl": "Polish", "se": "Swedish", "no": "Norwegian",
+	"fi": "Finnish", "dk": "Danish", "ch": "German (Switzerland)", "jp": "Japanese",
 }
 FILESYSTEM_CHOICES = [
 	("btrfs", "Checksums and copy-on-write snapshots"),
@@ -36,28 +24,23 @@ FILESYSTEM_CHOICES = [
 ]
 FIX_LABELS = {"network": "Fix network", "disk": "Choose another disk",
               "clock": "Turn on time sync"}
-
+FORMAT_DEFAULT = {"root": True, "home": True, "swap": True,
+                  "esp": True, "bios_grub": False}
 LOCALE_RESULT_LIMIT = 40
 RESERVED_USERNAMES = {"root", "daemon", "bin", "sys", "sync", "games", "man", "lp",
                       "mail", "news", "uucp", "proxy", "www-data", "backup", "list",
                       "irc", "gnats", "nobody", "messagebus", "sshd", "_apt"}
 
 
-# ── Helpers ────────────────────────────────────────────────────────────
-
-def _requirements_met(config, requirement):
-	needed = {name for name in requirement.split(",") if name != "-"}
-	available = set()
-	for entry in set(config.components) | set(config.hardware_packages) | set(config.software_packages):
-		available |= set(entry.split())
-	if config.multiarch_i386:
-		available.add("i386")
-	return needed <= available
-
+# ── Layout helpers ─────────────────────────────────────────────────────
 
 def _screen(title, items):
 	widgets = [urwid.Text(("title", f"\n  {title}\n")), urwid.Divider()] + items
 	return urwid.ListBox(urwid.SimpleFocusListWalker(widgets))
+
+
+def _open(app, title, items, footer_text=None):
+	app.show_screen(_screen(title, items), footer_text)
 
 
 def _action(markup, callback):
@@ -68,6 +51,16 @@ def _action(markup, callback):
 
 def _back_button(app):
 	return _action(("unset", "  Back"), lambda _: app.show_main())
+
+
+def _with_back(app, items):
+	return items + [urwid.Divider(), _back_button(app)]
+
+
+def _described(control, description, style="label", divider=True):
+	"""Control with an indented description beneath it, optionally followed by a divider."""
+	rows = [control, urwid.Text((style, f"      {description}"))]
+	return rows + [urwid.Divider()] if divider else rows
 
 
 def _set(app, attribute, value):
@@ -119,6 +112,8 @@ def _bind_filter(edit, results, candidates, on_pick, label=str, limit=None):
 	refresh("")
 
 
+# ── Change handlers ────────────────────────────────────────────────────
+
 def _on_toggle(_box, state, user_data):
 	"""Add or remove a value from a list attribute on the config."""
 	app, attribute, value = user_data
@@ -152,16 +147,14 @@ def _on_multiarch(_box, state, app):
 
 def _flag_rows(app, attribute, label, description):
 	"""Checkbox bound to a config flag, with a description line beneath it."""
-	return [
+	return _described(
 		urwid.CheckBox(label, state=getattr(app.config, attribute),
 		               on_state_change=_on_flag, user_data=(app, attribute)),
-		urwid.Text(("label", f"      {description}")),
-		urwid.Divider(),
-	]
+		description)
 
 
 def _wifi_busy(app, message):
-	app.show_screen(_screen("Wi-Fi", [urwid.Text(("warning", f"  {message}"))]))
+	_open(app, "Wi-Fi", [urwid.Text(("warning", f"  {message}"))])
 	app.loop.draw_screen()
 
 
@@ -174,10 +167,8 @@ def network(app):
 		urwid.Divider(),
 		_action("  Wi-Fi networks", lambda _: _wifi_scan(app)),
 		_action("  Launch nmtui (full network manager)", lambda _: _launch_nmtui(app)),
-		urwid.Divider(),
-		_back_button(app),
 	]
-	app.show_screen(_screen("Network", items))
+	_open(app, "Network", _with_back(app, items))
 
 
 def _launch_nmtui(app):
@@ -202,7 +193,7 @@ def _wifi_scan(app):
 		_action(("unset", "  Rescan"), lambda _: _wifi_scan(app)),
 		_action(("unset", "  Back"), lambda _: network(app)),
 	]
-	app.show_screen(_screen("Wi-Fi", items))
+	_open(app, "Wi-Fi", items)
 
 
 def _wifi_password(app, ssid, security):
@@ -227,7 +218,7 @@ def _wifi_password(app, ssid, security):
 		urwid.Divider(),
 		_action(("unset", "  Back"), lambda _: _wifi_scan(app)),
 	]
-	app.show_screen(_screen("Wi-Fi", items))
+	_open(app, "Wi-Fi", items)
 
 
 def _wifi_connect(app, ssid, password, security):
@@ -243,7 +234,7 @@ def _wifi_status(app, passed, message):
 		_action(("bold", "  Test connection (deb.debian.org)"), lambda _: _wifi_test(app)),
 		_action(("unset", "  Back to network"), lambda _: network(app)),
 	]
-	app.show_screen(_screen("Wi-Fi", items))
+	_open(app, "Wi-Fi", items)
 
 
 def _wifi_test(app):
@@ -276,8 +267,8 @@ def _check_rows(app, checks, style):
 
 
 def preflight(app, show_passed=False):
-	app.preflight = utils.preflight(app.config, app.online)
-	if not any(check.level != "ok" for check in app.preflight):
+	app.refresh_preflight()
+	if not app.preflight_issues():
 		app.show_main()
 		return
 	blockers = [check for check in app.preflight if check.level == "block"]
@@ -305,9 +296,8 @@ def preflight(app, show_passed=False):
 		_action(("bold", f"  {'Hide' if show_passed else 'Show'} passed checks ({len(passed)})"),
 		        lambda _: preflight(app, not show_passed)),
 		_action(("bold", "  Re-check"), lambda _: preflight(app, show_passed)),
-		_back_button(app),
 	]
-	app.show_screen(_screen("Pre-flight", items))
+	_open(app, "Pre-flight", items + [_back_button(app)])
 
 
 # ── Keyboard ───────────────────────────────────────────────────────────
@@ -332,10 +322,8 @@ def keyboard(app):
 		edit,
 		_action(("bold", "  Accept"), lambda _: choose(edit.edit_text.strip())),
 		error_text,
-		urwid.Divider(),
-		_back_button(app),
 	]
-	app.show_screen(_screen("Keyboard Layout", items))
+	_open(app, "Keyboard Layout", _with_back(app, items))
 
 
 # ── Timezone ───────────────────────────────────────────────────────────
@@ -368,12 +356,8 @@ def timezone(app):
 	]
 	if app.online:
 		items += [_action(("bold", "  Autodetect from network"), autodetect), status]
-	items += [
-		urwid.BoxAdapter(urwid.ListBox(results), 14),
-		urwid.Divider(),
-		_back_button(app),
-	]
-	app.show_screen(_screen("Timezone", items))
+	items.append(urwid.BoxAdapter(urwid.ListBox(results), 14))
+	_open(app, "Timezone", _with_back(app, items))
 
 
 # ── Locale ─────────────────────────────────────────────────────────────
@@ -411,13 +395,11 @@ def locale(app):
 		edit,
 		urwid.BoxAdapter(urwid.ListBox(results), 8),
 		error_text,
-		urwid.Divider(),
-		_back_button(app),
 	]
-	app.show_screen(_screen("Locale", items))
+	_open(app, "Locale", _with_back(app, items))
 
 
-# ── Disk ───────────────────────────────────────────────────────────────
+# ── Disk and partitioning ──────────────────────────────────────────────
 
 def disk(app):
 	items = [
@@ -426,17 +408,8 @@ def disk(app):
 	]
 	if not items:
 		items.append(urwid.Text(("error", "  No disks found")))
-	items += [urwid.Divider(), _back_button(app)]
-	app.show_screen(
-		_screen("Disk Selection", items),
-		footer_text="  ↑↓ navigate  Enter select  WARNING: selected disk will be erased",
-	)
-
-
-# ── Partitioning ───────────────────────────────────────────────────────
-
-FORMAT_DEFAULT = {"root": True, "home": True, "swap": True,
-                  "esp": True, "bios_grub": False}
+	_open(app, "Disk Selection", _with_back(app, items),
+	      footer_text="  ↑↓ navigate  Enter select  WARNING: selected disk will be erased")
 
 
 def _choose_disk(app, device):
@@ -463,19 +436,18 @@ def _set_automatic(app, swap_partition):
 
 
 def partition_mode(app):
-	items = [
-		_action(("bold", "  Automatic"), lambda _: _set_automatic(app, True)),
-		urwid.Text(("label", "      Erase the whole disk. Creates swap equal to RAM if available disk space.")),
-		urwid.Divider(),
-		_action(("bold", "  Automatic without swap"), lambda _: _set_automatic(app, False)),
-		urwid.Text(("label", "      Erase the whole disk. No swap partition is created.")),
-		urwid.Divider(),
-		_action(("bold", "  Manual"), lambda _: partition_layout(app)),
-		urwid.Text(("label", "      Use existing partitions. Only the ones you pick are formatted.")),
-		urwid.Divider(),
-		_back_button(app),
+	modes = [
+		("Automatic", "Erase the whole disk. Creates swap equal to RAM if available disk space.",
+		 lambda: _set_automatic(app, True)),
+		("Automatic without swap", "Erase the whole disk. No swap partition is created.",
+		 lambda: _set_automatic(app, False)),
+		("Manual", "Use existing partitions. Only the ones you pick are formatted.",
+		 lambda: partition_layout(app)),
 	]
-	app.show_screen(_screen("Partitioning", items))
+	items = []
+	for title, description, callback in modes:
+		items += _described(_action(("bold", f"  {title}"), lambda _, cb=callback: cb()), description)
+	_open(app, "Partitioning", items + [_back_button(app)])
 
 
 def _assign(app, role, device):
@@ -530,8 +502,8 @@ def partition_layout(app, error=""):
 		_action(("bold", "  Done"), lambda _: _finish_manual(app)),
 		_back_button(app),
 	]
-	app.show_screen(_screen("Manual Partitioning", items),
-	                footer_text="  ↑↓ navigate  Space toggle  Enter select  Esc back")
+	_open(app, "Manual Partitioning", items,
+	      footer_text="  ↑↓ navigate  Space toggle  Enter select  Esc back")
 
 
 # ── Filesystem ─────────────────────────────────────────────────────────
@@ -556,9 +528,9 @@ def filesystem(app):
 	items = []
 	for name, description in FILESYSTEM_CHOICES:
 		marker = ">" if config.filesystem == name else " "
-		items.append(_action(("bold", f"  {marker} {name}"),
-		                     lambda _, v=name: _choose_filesystem(app, v)))
-		items.append(urwid.Text(("label", f"      {description}")))
+		items += _described(_action(("bold", f"  {marker} {name}"),
+		                            lambda _, v=name: _choose_filesystem(app, v)),
+		                    description, divider=False)
 	items.append(urwid.Divider())
 	if config.filesystem == "btrfs":
 		items.append(urwid.CheckBox("  Snapshots with snapper", state=config.snapper,
@@ -570,8 +542,7 @@ def filesystem(app):
 	items.append(urwid.CheckBox("  Encrypt with LUKS", state=config.luks,
 	                            on_state_change=_on_luks, user_data=app))
 	items.append(urwid.Text(("label", "      Encrypts the root partition. You enter a passphrase at boot.")))
-	items += [urwid.Divider(), _back_button(app)]
-	app.show_screen(_screen("Filesystem", items))
+	_open(app, "Filesystem", _with_back(app, items))
 
 
 def luks_passphrase(app):
@@ -613,7 +584,7 @@ def luks_passphrase(app):
 	_form_screen(app, "Encryption", items, [passphrase, confirm], accept)
 
 
-# ── Hostname ───────────────────────────────────────────────────────────
+# ── Hostname and user ──────────────────────────────────────────────────
 
 def hostname(app):
 	edit = SubmitEdit("  Hostname: ", app.config.hostname)
@@ -633,13 +604,9 @@ def hostname(app):
 		error_text,
 		urwid.Divider(),
 		_action(("bold", "  Accept"), accept),
-		urwid.Divider(),
-		_back_button(app),
 	]
-	_form_screen(app, "Hostname", items, [edit], accept)
+	_form_screen(app, "Hostname", _with_back(app, items), [edit], accept)
 
-
-# ── User ───────────────────────────────────────────────────────────────
 
 def user(app):
 	username_edit = SubmitEdit("  Username: ", app.config.username)
@@ -680,28 +647,20 @@ def user(app):
 		error_text,
 		urwid.Divider(),
 		_action(("bold", "  Accept"), accept),
-		urwid.Divider(),
-		_back_button(app),
 	]
 	fields = [username_edit, pass_edit, pass_confirm, root_edit, root_confirm]
-	_form_screen(app, "User Account", items, fields, accept)
+	_form_screen(app, "User Account", _with_back(app, items), fields, accept)
 
 
 # ── Desktop and window managers ────────────────────────────────────────
 
 def _choice_rows(app, choice_id, label, detail, description, enabled=True):
 	if not enabled:
-		return [
-			urwid.Text(("unset", f"  {label:<14}{detail}  needs internet")),
-			urwid.Text(("unset", f"      {description}")),
-			urwid.Divider(),
-		]
-	return [
-		_action(f"  {label:<14}{detail}",
-		        lambda _, v=choice_id: _set(app, "desktop", v)),
-		urwid.Text(("label", f"      {description}")),
-		urwid.Divider(),
-	]
+		return _described(urwid.Text(("unset", f"  {label:<14}{detail}  needs internet")),
+		                  description, style="unset")
+	return _described(
+		_action(f"  {label:<14}{detail}", lambda _, v=choice_id: _set(app, "desktop", v)),
+		description)
 
 
 def _custom_repo(app):
@@ -727,10 +686,8 @@ def _custom_repo(app):
 		status,
 		urwid.Divider(),
 		_action(("bold", "  Check and use"), check),
-		urwid.Divider(),
-		_back_button(app),
 	]
-	app.show_screen(_screen("Custom Repo", items))
+	_open(app, "Custom Repo", _with_back(app, items))
 
 
 def desktop(app):
@@ -741,8 +698,8 @@ def desktop(app):
 			urwid.Text(("warning", "  Offline: only Console only can be installed. Connect for desktops.")),
 			urwid.Divider(),
 		]
-	for desktop_id, label, package, description in [utils.CONSOLE_ROW]:
-		items += _choice_rows(app, desktop_id, label, package, description)
+	desktop_id, label, package, description = utils.CONSOLE_ROW
+	items += _choice_rows(app, desktop_id, label, package, description)
 	for wm_id, label, _repo, _ref, description in utils.wm_rows():
 		items += _choice_rows(app, wm_id, label, "", description, enabled=app.online)
 	if app.online:
@@ -753,10 +710,8 @@ def desktop(app):
 		urwid.Text(("label", "      Any git repo with an install.sh at its root.")),
 		urwid.Divider(),
 		urwid.Text(("label", "  Default GUI environment.")),
-		urwid.Divider(),
-		_back_button(app),
 	]
-	app.show_screen(_screen("Desktop / Window Manager", items))
+	_open(app, "Desktop / Window Manager", _with_back(app, items))
 
 
 # ── Packages (apt components) ──────────────────────────────────────────
@@ -772,11 +727,9 @@ def packages_menu(app):
 	items += [
 		urwid.Divider(),
 		urwid.Text(("label", "  Optional. Adds apt sources to the installed system.")),
-		urwid.Divider(),
-		_back_button(app),
 	]
-	app.show_screen(_screen("Packages", items),
-	                footer_text="  ↑↓ navigate  Space toggle  Esc back")
+	_open(app, "Packages", _with_back(app, items),
+	      footer_text="  ↑↓ navigate  Space toggle  Esc back")
 
 
 # ── Hardware and Software (optional packages) ──────────────────────────
@@ -789,6 +742,16 @@ def drop_unavailable(config):
 		chosen[:] = [package for package in chosen
 		             if _requirements_met(config, requirements.get(package, "-"))
 		             and (config.online or not utils.needs_network(package))]
+
+
+def _requirements_met(config, requirement):
+	needed = {name for name in requirement.split(",") if name != "-"}
+	available = set()
+	for entry in set(config.components) | set(config.hardware_packages) | set(config.software_packages):
+		available |= set(entry.split())
+	if config.multiarch_i386:
+		available.add("i386")
+	return needed <= available
 
 
 def _on_archive_toggle(box, state, user_data):
@@ -834,11 +797,9 @@ def _extras_screen(app, menu, title):
 		urwid.Divider(),
 		urwid.Text(("label", "  Optional. Installed after the desktop." if app.online
 		            else "  Offline: only packages bundled on this ISO can be installed.")),
-		urwid.Divider(),
-		_back_button(app),
 	]
-	app.show_screen(_screen(title, items),
-	                footer_text="  ↑↓ navigate  Space toggle  Esc back")
+	_open(app, title, _with_back(app, items),
+	      footer_text="  ↑↓ navigate  Space toggle  Esc back")
 
 
 def hardware(app):
@@ -877,10 +838,8 @@ def secure_boot(app):
 		error_text,
 		urwid.Divider(),
 		_action(("bold", "  Accept"), accept),
-		urwid.Divider(),
-		_back_button(app),
 	]
-	_form_screen(app, "Secure Boot", items, [passphrase, confirm], accept)
+	_form_screen(app, "Secure Boot", _with_back(app, items), [passphrase, confirm], accept)
 
 
 # ── Advanced ───────────────────────────────────────────────────────────
@@ -901,21 +860,18 @@ def advanced(app):
 		            "Recommended. Used before any swap partition. Doesn't support hibernation."),
 		*_flag_rows(app, "auto_updates", "  Automatic security updates",
 		            "Installs security fixes daily. Never reboots on its own."),
-		urwid.CheckBox("  32-bit (i386) support", state=config.multiarch_i386,
-		               on_state_change=_on_multiarch, user_data=app),
-		urwid.Text(("label", "      Adds the i386 architecture for 32-bit libraries and apps.")),
-		urwid.Divider(),
+		*_described(urwid.CheckBox("  32-bit (i386) support", state=config.multiarch_i386,
+		                           on_state_change=_on_multiarch, user_data=app),
+		            "Adds the i386 architecture for 32-bit libraries and apps."),
 	]
 	if not app.online:
 		items += [urwid.Text(("unset", "  Backports repository, kernel and Mesa need internet.")),
 		          urwid.Divider()]
 	else:
-		items += [
+		items += _described(
 			urwid.CheckBox("  Backports repository", state=config.backports_repo,
 			               on_state_change=_on_backports_repo, user_data=app),
-			urwid.Text(("label", "      trixie-backports, pinned so nothing upgrades unless requested.")),
-			urwid.Divider(),
-		]
+			"trixie-backports, pinned so nothing upgrades unless requested.")
 	if app.online and config.backports_repo:
 		items += _flag_rows(app, "backports_kernel", "  Backports kernel",
 		                    "Newer kernel from trixie-backports, kept updated.")
@@ -929,11 +885,9 @@ def advanced(app):
 	items += [
 		swappiness_edit,
 		urwid.Text(("label", "      Lower keeps more in RAM. 10 suits gaming, 60 is the default.")),
-		urwid.Divider(),
-		_back_button(app),
 	]
-	app.show_screen(_screen("Advanced", items),
-	                footer_text="  ↑↓ navigate  Space toggle  Esc back")
+	_open(app, "Advanced", _with_back(app, items),
+	      footer_text="  ↑↓ navigate  Space toggle  Esc back")
 
 
 # ── Summary / install ──────────────────────────────────────────────────
@@ -945,38 +899,35 @@ def summary(app):
 		app.show_main()
 		return
 	rows = [
-		("Boot mode",  config.boot_mode.upper()),
-		("Install mode", "online" if config.online else "offline (console only)"),
-		("Disk",       config.disk),
-		("Filesystem", config.filesystem),
-		("Keyboard",   config.keymap),
-		("Timezone",   config.timezone),
-		("Locale",     config.locale),
-		("Hostname",   config.hostname),
-		("User",       config.username),
-		("Root login", "yes" if config.root_pass else "disabled"),
+		("Boot mode",      config.boot_mode.upper()),
+		("Install mode",   "online" if config.online else "offline (console only)"),
+		("Disk",           config.disk),
+		("Filesystem",     config.filesystem),
+		("Keyboard",       config.keymap),
+		("Timezone",       config.timezone),
+		("Locale",         config.locale),
+		("Hostname",       config.hostname),
+		("User",           config.username),
+		("Root login",     "yes" if config.root_pass else "disabled"),
 		("Swap partition", "yes" if config.has_swap_partition() else "no"),
 		("zram",           "yes" if config.zram else "no"),
-		("Encryption", "LUKS2" if config.luks else "no"),
-		("Snapshots",  "snapper" if config.snapper else "no"),
-		("Auto updates", "yes" if config.auto_updates else "no"),
-		("Desktop",    config.desktop_label()),
-		("Components", ", ".join(config.components) or "main only"),
-		("Hardware",   ", ".join(config.hardware_packages) or "none"),
-		("Software",   ", ".join(config.software_packages) or "none"),
-		("Advanced",   ", ".join(config.advanced_labels()) or "none"),
+		("Encryption",     "LUKS2" if config.luks else "no"),
+		("Snapshots",      "snapper" if config.snapper else "no"),
+		("Auto updates",   "yes" if config.auto_updates else "no"),
+		("Desktop",        config.desktop_label()),
+		("Components",     ", ".join(config.components) or "main only"),
+		("Hardware",       ", ".join(config.hardware_packages) or "none"),
+		("Software",       ", ".join(config.software_packages) or "none"),
+		("Advanced",       ", ".join(config.advanced_labels()) or "none"),
 	]
-	items = [urwid.Text([("label", f"  {label:<16}"), ("value", value)])
-	         for label, value in rows]
+	items = [urwid.Text([("label", f"  {label:<16}"), ("value", value)]) for label, value in rows]
 	items += [
 		urwid.Divider(),
 		urwid.Text(("warning", f"  WARNING: {config.erase_text()}!")),
 		urwid.Divider(),
 		_action(("error", "  Begin installation"), lambda _: _begin_install(app)),
-		urwid.Divider(),
-		_back_button(app),
 	]
-	app.show_screen(_screen("Installation Summary", items))
+	_open(app, "Installation Summary", _with_back(app, items))
 
 
 def _begin_install(app):

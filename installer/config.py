@@ -12,18 +12,18 @@ REQUIRED_FIELDS = (
 @dataclass
 class Config:
 	fake_mode: bool = False  # --fake: UI only, Install disabled
-	boot_mode: str = ""     # "uefi" or "bios", detected at startup
+	boot_mode: str = ""  # "uefi" or "bios", detected at startup
 	keymap: str = ""
 	timezone: str = ""
 	locale: str = ""
 	disk: str = ""
-	filesystem: str = ""    # "btrfs", "ext4", or "xfs"
+	filesystem: str = ""  # "btrfs", "ext4", or "xfs"
 	hostname: str = ""
 	username: str = ""
 	user_pass: str = ""
-	root_pass: str = ""     # blank disables root login
-	desktop: str = ""       # id from wms.list, "console" for none, "custom" for a git URL
-	custom_repo: str = ""   # git URL, used when desktop == "custom"
+	root_pass: str = ""  # blank disables root login
+	desktop: str = ""  # id from wms.list, "console" for none, "custom" for a git URL
+	custom_repo: str = ""  # git URL, used when desktop == "custom"
 	components: list = field(default_factory=list)
 	hardware_packages: list = field(default_factory=list)
 	software_packages: list = field(default_factory=list)
@@ -54,6 +54,10 @@ class Config:
 		self.custom_repo = ""
 		self.backports_repo = self.backports_kernel = self.backports_mesa = False
 
+	def selected_packages(self) -> list:
+		"""Hardware and software entries the user chose."""
+		return self.hardware_packages + self.software_packages
+
 	def has_swap_partition(self) -> bool:
 		if self.manual:
 			return "swap" in self.layout
@@ -82,8 +86,7 @@ class Config:
 
 	def needs_mok(self) -> bool:
 		"""Secure Boot is on and a selected package builds DKMS modules."""
-		selected = self.hardware_packages + self.software_packages
-		words = {word for entry in selected for word in entry.split()}
+		words = {word for entry in self.selected_packages() for word in entry.split()}
 		return self.secure_boot and bool(words & dkms_packages())
 
 	def advanced_labels(self) -> list:

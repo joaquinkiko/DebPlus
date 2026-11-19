@@ -2,6 +2,7 @@
 # Modifications Copyright (C) 2026 JoaquinKiko.
 # SPDX-License-Identifier: GPL-2.0-only. See COPYING and NOTICE.
 
+import functools
 import os
 
 import urwid
@@ -133,7 +134,7 @@ class App:
 		return urwid.AttrMap(urwid.Text(text), "footer")
 
 	def _steps(self):
-		"""(label, value, callback) per step. A truthy value marks it done."""
+		"""(label, value, callback) per step in display order. A truthy value marks it done."""
 		config = self.config
 		steps = [
 			("Network",      "connected" if self.online else "", lambda: screens.network(self)),
@@ -151,12 +152,12 @@ class App:
 			                 lambda: screens.hardware(self)),
 			("Software",     _chosen_label(config.software_packages),
 			                 lambda: screens.software(self)),
-			("Advanced",     _chosen_label(config.advanced_labels()),
-			                 lambda: screens.advanced(self)),
 		]
 		if config.needs_mok():
-			steps.insert(-1, ("Secure Boot", "set" if config.mok_pass else "",
-			                  lambda: screens.secure_boot(self)))
+			steps.append(("Secure Boot", "set" if config.mok_pass else "",
+			              lambda: screens.secure_boot(self)))
+		steps.append(("Advanced", _chosen_label(config.advanced_labels()),
+		              lambda: screens.advanced(self)))
 		if self.preflight_issues():
 			steps.insert(0, ("Pre-flight", "", lambda: screens.preflight(self)))
 		return steps
@@ -170,9 +171,8 @@ class App:
 				item = _rail_item(GLYPH_DONE, "success", label, "bold")
 			else:
 				item = _rail_item(GLYPH_TODO, "unset", label, "label")
-			urwid.connect_signal(
-				item, "activate",
-				lambda _, cb=callback, idx=index: self._menu_activate(cb, idx))
+			urwid.connect_signal(item, "activate",
+			                     functools.partial(self._menu_activate, callback, index))
 			items.append(item)
 
 		items.append(urwid.Divider())
@@ -216,7 +216,7 @@ class App:
 			("Encryption", "LUKS2" if config.luks else "none"),
 			("Snapshots",  "snapper" if config.snapper else "none"),
 			("Components", ", ".join(["main"] + config.components)),
-			("Extras",     ", ".join(config.hardware_packages + config.software_packages)),
+			("Extras",     ", ".join(config.selected_packages())),
 			("Advanced",   ", ".join(config.advanced_labels())),
 		]:
 			style = "value" if value else "unset"
@@ -248,15 +248,15 @@ class App:
 		self._in_main = False
 		self._in_splash = True
 
-		manual = Selectable(("bold", "  Start Setup"))
-		urwid.connect_signal(manual, "activate", lambda _: self.show_main())
+		start = Selectable(("bold", "  Start Setup"))
+		urwid.connect_signal(start, "activate", lambda _: self.show_main())
 		abort = Selectable(("bold", "  Abort"))
 		urwid.connect_signal(abort, "activate", lambda _: self._exit())
 
 		pile = urwid.Pile([
 			urwid.Padding(urwid.Text(("title", LOGO)), align="center", width="pack"),
 			urwid.Divider(),
-			manual,
+			start,
 			abort,
 		])
 		pile.focus_position = 2  # Start Setup
@@ -288,7 +288,7 @@ class App:
 		self._set_frame(self._steps(), widget, footer_text or SCREEN_FOOTER,
 		                active=self._active_step, focus_right=True)
 
-	def _menu_activate(self, callback, index):
+	def _menu_activate(self, callback, index, _source):
 		self._menu_focus = index
 		self._active_step = index
 		callback()
