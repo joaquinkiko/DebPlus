@@ -16,6 +16,11 @@ REPO_DIR="$ISO_DIR/install/repo"
 PAYLOAD_DIR="$ROOTFS_DIR/opt/debplus"
 ISO_OUTPUT="$SCRIPT_DIR/${PROFILE_SLUG}-${SUITE}-$(date +%Y%m%d).iso"
 KEYRING=/usr/share/keyrings/debian-archive-keyring.gpg
+EFI_IMAGE="$ISO_DIR/boot/efi.img"
+EFI_STAGING_DIR="$WORK_DIR/efi-boot"
+SIGNED_SHIM="usr/lib/shim/shimx64.efi.signed"
+SIGNED_MOK_MANAGER="usr/lib/shim/mmx64.efi.signed"
+SIGNED_GRUB="usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 msg() { echo ":: $*"; }
@@ -59,7 +64,10 @@ preflight() {
 		[debootstrap]=debootstrap
 		[xorriso]=xorriso
 		[mksquashfs]=squashfs-tools
-		[grub-mkrescue]=grub-common
+		[grub-mkimage]=grub-common
+		[mkfs.fat]=dosfstools
+		[mmd]=mtools
+		[mcopy]=mtools
 		[mformat]=mtools
 		[dpkg-scanpackages]=dpkg-dev
 		[findmnt]=util-linux
@@ -75,6 +83,7 @@ preflight() {
 	[ -f "$KEYRING" ] || problems+=("missing $KEYRING (apt install debian-archive-keyring)")
 	[ -d /usr/lib/grub/i386-pc ] || problems+=("missing GRUB BIOS modules (apt install grub-pc-bin)")
 	[ -d /usr/lib/grub/x86_64-efi ] || problems+=("missing GRUB UEFI modules (apt install grub-efi-amd64-bin)")
+	[ -f /usr/lib/grub/i386-pc/boot_hybrid.img ] || problems+=("missing boot_hybrid.img (apt install grub-pc-bin)")
 
 	for variable_name in PROFILE_SLUG SUITE MIRROR ISO_LABEL; do
 		[ -n "${!variable_name:-}" ] || problems+=("profile.env does not set $variable_name")
@@ -301,6 +310,34 @@ copy_boot_files() {
 	msg "Copying kernel and initrd..."
 	cp "$(latest_file "$ROOTFS_DIR"/boot/vmlinuz-*)" "$ISO_DIR/boot/vmlinuz"
 	cp "$(latest_file "$ROOTFS_DIR"/boot/initrd.img-*)" "$ISO_DIR/boot/initrd.img"
+	cp -r /usr/lib/grub/i386-pc "$ISO_DIR/boot/grub/"
+}
+
+build_efi_image() {
+	msg "Building signed EFI boot image..."
+	[ -f "$ROOTFS_DIR/$SIGNED_SHIM" ] || die "shim-signed missing from live rootfs"
+	[ -f "$ROOTFS_DIR/$SIGNED_GRUB" ] || die "grub-efi-amd64-signed missing from live rootfs"
+	[ -f "$ROOTFS_DIR/$SIGNED_MOK_MANAGER" ] || die "mmx64.efi missing from live rootfs"
+
+	mkdir -p "$EFI_STAGING_DIR"
+	install -m644 "$ROOTFS_DIR/$SIGNED_SHIM" "$EFI_STAGING_DIR/BOOTX64.EFI"
+	install -m644 "$ROOTFS_DIR/$SIGNED_GRUB" "$EFI_STAGING_DIR/grubx64.efi"
+	install -m644 "$ROOTFS_DIR/$SIGNED_MOK_MANAGER" "$EFI_STAGING_DIR/mmx64.efi"
+	cat > "$EFI_STAGING_DIR/grub.cfg" << 'CFG'
+search --no-floppy --file --set=root /boot/grub/grub.cfg
+configfile ($root)/boot/grub/grub.cfg
+CFG
+
+	mkfs.fat -C "$EFI_IMAGE" 16384 >/dev/null
+	mmd -i "$EFI_IMAGE" ::/EFI ::/EFI/BOOT
+	mcopy -i "$EFI_IMAGE" "$EFI_STAGING_DIR"/* ::/EFI/BOOT/
+}
+
+build_bios_boot_image() {
+	msg "Building BIOS El Torito image..."
+	grub-mkimage -O i386-pc-eltorito -d /usr/lib/grub/i386-pc \
+		-o "$ISO_DIR/boot/grub/i386-pc/eltorito.img" -p /boot/grub \
+		iso9660 biosdisk part_msdos normal configfile search linux ls echo
 }
 
 menu_entry() {
@@ -321,9 +358,56 @@ write_grub_config() {
 
 build_iso() {
 	msg "Building ISO..."
-	grub-mkrescue -o "$ISO_OUTPUT" "$ISO_DIR" \
-		-- -volid "$ISO_LABEL" \
-		-boot_image any mbr_force_bootable=on
+	xorriso -as mkisofs \
+		-iso-level 3 -full-iso9660-filenames \
+		-volid "$ISO_LABEL" \
+		-eltorito-boot boot/grub/i386-pc/eltorito.img \
+		-no-emul-boot -boot-load-size 4 -boot-info-table --grub2-boot-info \
+		-eltorito-alt-boot \
+		-e boot/efi.img -no-emul-boot \
+		-append_partition 2 0xef "$EFI_IMAGE" \
+		-isohybrid-gpt-basdat \
+		-partition_offset 16 \
+		--grub2-mbr /usr/lib/grub/i386-pc/boot_hybrid.img \
+		-o "$ISO_OUTPUT" "$ISO_DIR"
+}
+
+validate_iso() {
+	msg "Validating ISO..."
+	local check_dir
+	check_dir="$(mktemp -d)"
+	local efi_image="$check_dir/efi.img"
+	local bios_grub_cfg="$check_dir/iso-grub.cfg"
+
+	# Fails the build and removes the ISO on any check failure
+	validate_fail() {
+		rm -rf "$check_dir" "$ISO_OUTPUT"
+		die "ISO validation failed: $*"
+	}
+
+	xorriso -indev "$ISO_OUTPUT" -report_el_torito plain 2>/dev/null > "$check_dir/eltorito.txt" ||
+		validate_fail "cannot read El Torito catalog"
+	grep -q 'BIOS' "$check_dir/eltorito.txt" || validate_fail "BIOS boot entry missing"
+	grep -q 'UEFI' "$check_dir/eltorito.txt" || validate_fail "UEFI boot entry missing"
+
+	xorriso -osirrox on -indev "$ISO_OUTPUT" -extract /boot/efi.img "$efi_image" >/dev/null 2>&1 ||
+		validate_fail "cannot extract boot/efi.img"
+	for name in BOOTX64.EFI grubx64.efi mmx64.efi grub.cfg; do
+		mdir -i "$efi_image" "::/EFI/BOOT/$name" >/dev/null 2>&1 ||
+			validate_fail "$name missing from EFI image"
+	done
+
+	mcopy -i "$efi_image" ::/EFI/BOOT/grubx64.efi ::/EFI/BOOT/grub.cfg "$check_dir/" ||
+		validate_fail "cannot copy EFI files"
+	grub-script-check "$check_dir/grub.cfg" || validate_fail "EFI grub.cfg has syntax errors"
+	grep -aq iso9660 "$check_dir/grubx64.efi" || validate_fail "signed GRUB lacks iso9660 support"
+
+	xorriso -osirrox on -indev "$ISO_OUTPUT" -extract /boot/grub/grub.cfg "$bios_grub_cfg" >/dev/null 2>&1 ||
+		validate_fail "cannot extract ISO grub.cfg"
+	grub-script-check "$bios_grub_cfg" || validate_fail "ISO grub.cfg has syntax errors"
+
+	rm -rf "$check_dir"
+	msg "ISO validated"
 }
 
 # ── Main ───────────────────────────────────────────────────────────────
@@ -353,8 +437,11 @@ main() {
 	rm -rf "$TARGET_DIR"
 
 	copy_boot_files
+	build_bios_boot_image
+	build_efi_image
 	write_grub_config
 	build_iso
+	validate_iso
 
 	assert_no_active_mounts
 	rm -rf "$WORK_DIR"
