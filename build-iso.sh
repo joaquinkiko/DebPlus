@@ -53,6 +53,15 @@ assert_no_active_mounts() {
 
 # ── Preflight ──────────────────────────────────────────────────────────
 
+resolver_config_path() {
+	local upstream_config=/run/systemd/resolve/resolv.conf
+	if [ -f "$upstream_config" ]; then
+		echo "$upstream_config"
+	else
+		echo /etc/resolv.conf
+	fi
+}
+
 preflight() {
 	local -a problems=()
 	local command_name variable_name relative_path directory free_kilobytes
@@ -97,7 +106,11 @@ preflight() {
 		[ -d "$SCRIPT_DIR/$directory" ] || problems+=("missing directory $directory")
 	done
 	compgen -G "$SCRIPT_DIR/options/*.list" >/dev/null || problems+=("no options/*.list files found")
-	[ -f /etc/resolv.conf ] || problems+=("host has no /etc/resolv.conf (needed for chroot networking)")
+	local resolver_config
+	resolver_config="$(resolver_config_path)"
+	[ -f "$resolver_config" ] || problems+=("no resolver config at $resolver_config")
+	grep -Eq '^nameserver[[:space:]]+(127\.|::1)' "$resolver_config" 2>/dev/null &&
+		problems+=("$resolver_config lists only a local stub resolver, chroot apt cannot use it")
 
 	# Two rootfs trees, squashfs images and ISO: ~10 GiB to be safe
 	free_kilobytes="$(df --output=avail -k "$SCRIPT_DIR" | tail -n1 | tr -d ' ')"
@@ -157,7 +170,7 @@ run_setup_in_chroot() {
 	cat > "$root_dir/tmp/setup.sh"
 	chmod +x "$root_dir/tmp/setup.sh"
 	rm -f "$root_dir/etc/resolv.conf"
-	cp /etc/resolv.conf "$root_dir/etc/resolv.conf"
+	cp /etc/resolv.conf "$root_dir/etc/resolv.conf"	cp -L "$(resolver_config_path)" "$root_dir/etc/resolv.conf"
 	chroot "$root_dir" /tmp/setup.sh
 	: > "$root_dir/etc/resolv.conf"
 	rm -f "$root_dir/tmp/setup.sh"
@@ -193,6 +206,10 @@ build_live_rootfs() {
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
+# No services should start inside the build chroot
+printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d
+chmod +x /usr/sbin/policy-rc.d
+
 apt-get update
 apt-get install -y --no-install-recommends $(cat /tmp/live.pkgs)
 
@@ -225,6 +242,7 @@ fi
 PROFILE
 
 apt-get clean
+rm -f /usr/sbin/policy-rc.d
 rm -rf /var/lib/apt/lists/* /tmp/*
 SETUP
 
