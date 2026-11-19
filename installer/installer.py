@@ -560,10 +560,14 @@ def configure_encryption(config: Config):
 	ok("Encryption configured")
 
 
-def configure_snapper():
+def configure_snapper(config: Config):
+	if not config.snapper:
+		return
 	msg("Configuring snapper...")
-	_chroot(["snapper", "-c", "root", "create-config", "/"])
-	_chroot(["snapper", "-c", "root", "create", "--description", "post-install"])
+	if not os.path.isfile(f"{MNT}/etc/snapper/configs/root"):
+		_chroot(["snapper", "-c", "root", "create-config", "/"])
+	if not os.path.isdir(f"{MNT}/.snapshots/1"):
+		_chroot(["snapper", "-c", "root", "create", "--description", "post-install"])
 	ok("Snapper configured")
 
 
@@ -611,8 +615,6 @@ def configure_system(config: Config):
 
 	if config.luks:
 		configure_encryption(config)
-	if config.snapper:
-		configure_snapper()
 	if config.auto_updates:
 		configure_auto_updates()
 
@@ -897,6 +899,7 @@ def run_install(config: Config):
 		("Extras", extras_stage),
 		("Secure Boot", lambda: configure_secure_boot(config)),
 		("Bootloader", lambda: install_bootloader(config)),
+		("Snapshots", lambda: configure_snapper(config)),
 	]
 	PROGRESS.start(len(stages))
 	_emit(f"\n  {BOLD}{CYAN}Installing {PROFILE['PROFILE_NAME']}{NC}\n")
