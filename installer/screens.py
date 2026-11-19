@@ -32,6 +32,40 @@ RESERVED_USERNAMES = {"root", "daemon", "bin", "sys", "sync", "games", "man", "l
                       "irc", "gnats", "nobody", "messagebus", "sshd", "_apt"}
 
 
+DIGIT_PATTERN = re.compile(r"\d")
+UPPER_PATTERN = re.compile(r"[A-Z]")
+SYMBOL_PATTERN = re.compile(r"[^A-Za-z0-9]")
+STRENGTH_LABELS = ("Very Weak", "Very Weak", "Weak", "Okay", "Strong", "Very Strong", "Very Strong")
+STRENGTH_STYLES = {"Can't be empty": "error", "Very Weak": "error", "Weak": "warning",
+                   "Okay": "warning", "Strong": "success", "Very Strong": "success"}
+
+
+def _password_strength(text):
+	if not text:
+		return "Can't be empty"
+	classes = sum(bool(pattern.search(text))
+	              for pattern in (DIGIT_PATTERN, UPPER_PATTERN, SYMBOL_PATTERN))
+	length = len(text)
+	length_points = 0 if length < 8 else 1 if length < 12 else 2 if length < 16 else 3
+	return STRENGTH_LABELS[classes + length_points]
+
+
+def _strength_text(edit, empty_note=None):
+	"""Label that updates as the user types into edit. empty_note replaces the empty-state message."""
+	label = urwid.Text("")
+
+	def refresh(_, text):
+		if not text and empty_note:
+			label.set_text(("warning", f"      {empty_note}"))
+			return
+		name = _password_strength(text)
+		label.set_text((STRENGTH_STYLES[name], f"      {name}"))
+
+	urwid.connect_signal(edit, "change", refresh)
+	refresh(None, edit.edit_text)
+	return label
+
+
 # ── Layout helpers ─────────────────────────────────────────────────────
 
 def _screen(title, items):
@@ -552,7 +586,7 @@ def luks_passphrase(app):
 
 	def accept(_=None):
 		error = _validate([
-			(len(passphrase.edit_text) < 8, "Use at least 8 characters"),
+			(not passphrase.edit_text, "Passphrase cannot be empty"),
 			(passphrase.edit_text != confirm.edit_text, "Passphrases don't match"),
 		])
 		if error:
@@ -575,6 +609,7 @@ def luks_passphrase(app):
 	items += [
 		urwid.Divider(),
 		passphrase,
+		_strength_text(passphrase),
 		confirm,
 		error_text,
 		urwid.Divider(),
@@ -639,10 +674,12 @@ def user(app):
 		urwid.Divider(),
 		username_edit,
 		pass_edit,
+		_strength_text(pass_edit),
 		pass_confirm,
 		urwid.Divider(),
 		urwid.Text(("label", "  Root password (leave blank to disable root login):")),
 		root_edit,
+		_strength_text(root_edit, "Root login disabled"),
 		root_confirm,
 		error_text,
 		urwid.Divider(),
