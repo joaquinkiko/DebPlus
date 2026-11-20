@@ -12,6 +12,7 @@ wireless-regdb
 firmware-linux-free
 ca-certificates
 curl
+wget
 git
 nano
 btrfs-progs
