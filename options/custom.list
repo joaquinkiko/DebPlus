@@ -4,6 +4,8 @@ brave|software|Browsers|Brave|brave.sh|-
 flatpak|software|Packages|Flatpak|flatpak.sh|-
 steam|software|Gaming|Steam|steam.sh|contrib,i386
 heroic|software|Gaming|Heroic|heroic.sh|flatpak
+lutris|software|Gaming|Lutris|lutris.sh|-
+minecraft|software|Gaming|Minecraft|minecraft.sh|flatpak
 sublime|software|Text Editing|Sublime|sublime.sh|-
 discord|software|Communication|Discord|discord.sh|flatpak
 signal|software|Communication|Signal|signal.sh|-
