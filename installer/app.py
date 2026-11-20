@@ -264,7 +264,7 @@ class App:
 		self._in_splash = True
 
 		start = Selectable(("bold", "  Start Setup"))
-		urwid.connect_signal(start, "activate", lambda _: self.show_intro(autodetect=False))
+		urwid.connect_signal(start, "activate", lambda _: self.start_setup())
 		detect = Selectable(("bold", "  Hardware Detect"))
 		urwid.connect_signal(detect, "activate", lambda _: self.show_intro(autodetect=True))
 		abort = Selectable(("bold", "  Abort"))
@@ -282,6 +282,14 @@ class App:
 		self.frame.body = urwid.Filler(pile, valign="middle")
 		self.frame.footer = self._make_footer(SPLASH_FOOTER)
 
+	def start_setup(self):
+		"""Open the intro only when pre-flight has something to say, otherwise go straight to the installer."""
+		self.refresh_preflight()
+		if self.preflight_issues():
+			self.show_intro(autodetect=False)
+		else:
+			self.show_main()
+
 	def show_intro(self, autodetect):
 		"""Intro screen. With autodetect, shows detections and checkboxes; always shows pre-flight warnings."""
 		self._in_splash = True
@@ -295,6 +303,9 @@ class App:
 
 		self._intro_list = urwid.ListBox(urwid.SimpleFocusListWalker([]))
 		self._refresh_intro()
+		rows = self._intro_list.body
+		self._intro_list.focus_position = next(
+			index for index, row in enumerate(rows) if row.selectable())
 		self.frame.body = self._intro_list
 		self.frame.footer = self._make_footer(INTRO_FOOTER)
 
