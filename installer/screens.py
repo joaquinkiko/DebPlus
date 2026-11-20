@@ -1072,6 +1072,60 @@ def firewall(app):
 		footer_text="  ↑↓ navigate  Enter select  Space toggle  Esc back")
 
 
+GIT_EDITORS = ["nano", "vim", "nvim"]
+GIT_PULL = ["", "false", "true"]
+GIT_PULL_LABELS = {"": "not set", "false": "merge", "true": "rebase"}
+
+
+def _cycle_git(app, attribute, options, store):
+	store()
+	current = getattr(app.config, attribute)
+	setattr(app.config, attribute, options[(options.index(current) + 1) % len(options)])
+	git(app)
+
+
+def git(app):
+	config = app.config
+	name_edit = SubmitEdit("  Name:           ", config.git_name)
+	email_edit = SubmitEdit("  Email:          ", config.git_email)
+	branch_edit = SubmitEdit("  Default branch: ", config.git_default_branch)
+	error_text = urwid.Text("")
+
+	def store():
+		config.git_name = name_edit.edit_text.strip()
+		config.git_email = email_edit.edit_text.strip()
+		config.git_default_branch = branch_edit.edit_text.strip()
+
+	def accept(_=None):
+		email = email_edit.edit_text.strip()
+		branch = branch_edit.edit_text.strip()
+		error = _validate([
+			(email and not re.match(r"^[^@\s]+@[^@\s]+$", email), "Email needs an @"),
+			(not branch or " " in branch, "Branch name cannot be empty or contain spaces"),
+		])
+		if error:
+			_show_error(error_text, error)
+		else:
+			store()
+			app.show_main()
+
+	items = [
+		name_edit,
+		email_edit,
+		branch_edit,
+		_action(f"  Editor          {config.git_editor}",
+			lambda _: _cycle_git(app, "git_editor", GIT_EDITORS, store)),
+		_action(f"  Pull behavior   {GIT_PULL_LABELS[config.git_pull_rebase]}",
+			lambda _: _cycle_git(app, "git_pull_rebase", GIT_PULL, store)),
+		urwid.Text(("label", "      Merge keeps history. Rebase replays your commits on top of upstream.")),
+		urwid.Divider(),
+		error_text,
+		_action(("bold", "  Accept"), accept),
+	]
+	_form_screen(app, "Git", _with_back(app, items),
+		[name_edit, email_edit, branch_edit], accept)
+
+
 # ── Advanced ───────────────────────────────────────────────────────────
 
 def _on_backports_repo(_box, state, app):
@@ -1117,6 +1171,8 @@ def advanced(app):
 	items += _described(
 		_action(f"  Firewall (UFW)  {'enabled' if config.ufw else 'disabled'}", lambda _: firewall(app)),
 		"Default policies and allow rules for common services.")
+	items += _described(_action("  Git", lambda _: git(app)),
+		"Name, email, default branch, editor, and pull behavior.")
 	swappiness_edit = urwid.Edit("  Swappiness (0-100): ", str(config.swappiness))
 	urwid.connect_signal(swappiness_edit, "change", _on_swappiness, app)
 	items += [
@@ -1157,6 +1213,8 @@ def summary(app):
 		("Components",     ", ".join(config.components) or "main only"),
 		("Hardware",       ", ".join(config.hardware_packages) or "none"),
 		("Software",       ", ".join(config.software_packages) or "none"),
+		("Git",            f"{config.git_name or 'no name'} <{config.git_email or 'no email'}>, "
+		                   f"branch {config.git_default_branch}, editor {config.git_editor}"),
 		("Advanced",       ", ".join(config.advanced_labels()) or "none"),
 	]
 	items = [urwid.Text([("label", f"  {label:<16}"), ("value", value)]) for label, value in rows]

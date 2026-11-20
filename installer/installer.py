@@ -893,6 +893,21 @@ def configure_firewall(config: Config):
 	ok("Firewall configured")
 
 
+def configure_git(config: Config):
+	msg("Configuring git...")
+	settings = [
+		("init.defaultBranch", config.git_default_branch),
+		("core.editor", config.git_editor),
+		("pull.rebase", config.git_pull_rebase),
+		("user.name", config.git_name),
+		("user.email", config.git_email),
+	]
+	for key, value in settings:
+		if value:
+			_chroot(["runuser", "-u", config.username, "--", "git", "config", "--global", key, value])
+	ok("Git configured")
+
+
 # ── Cleanup and orchestration ─────────────────────────────────────────
 
 def cleanup():
@@ -1000,6 +1015,7 @@ def run_install(config: Config):
 		("Desktop", desktop_stage),
 		("Extras", extras_stage),
 		("Firewall", lambda: configure_firewall(config)),
+		("Git", lambda: configure_git(config)),
 		("Secure Boot", lambda: configure_secure_boot(config)),
 		("Bootloader", lambda: install_bootloader(config)),
 		("Snapshots", lambda: configure_snapper(config)),

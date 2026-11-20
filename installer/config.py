@@ -41,6 +41,11 @@ class Config:
 	ufw_incoming: str = "deny"
 	ufw_outgoing: str = "allow"
 	firewall_rules: list = field(default_factory=firewall_default_ids)  # ids from firewall.list
+	git_name: str = ""
+	git_email: str = ""
+	git_default_branch: str = "main"
+	git_editor: str = "nano"
+	git_pull_rebase: str = ""  # "", "false" (merge), or "true" (rebase)
 	manual: bool = False
 	free_space: bool = False  # install into unallocated space, keeping existing partitions
 	dual_boot: bool = False  # other systems may be present. Set during partitioning
