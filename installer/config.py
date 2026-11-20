@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from .utils import ESP_RESERVE_GIB, MIN_DISK_GIB, MIN_HOME_GIB, dkms_packages
+from .utils import ESP_RESERVE_GIB, MIN_DISK_GIB, MIN_HOME_GIB, boot_reserve_mib, dkms_packages
 
 # Fields that must be set before Install unlocks. Everything else is optional.
 REQUIRED_FIELDS = (
@@ -84,16 +84,24 @@ class Config:
 			return f"Only unallocated space on {self.disk} will be used"
 		return f"All data on {self.disk} will be erased"
 
-	def custom_free_gib(self, space_mib: int, swap_gib: int, root_gib: int, home_gib: int) -> int:
-		"""GiB left in space_mib after swap and any fixed root or home. Negative means over."""
-		used_mib = (swap_gib + root_gib + home_gib) * 1024
-		return (space_mib - used_mib) // 1024
+	def custom_layout(self, space_mib: int, swap_gib: int, root_gib: int, home_gib: int) -> dict:
+		"""Sizes the custom fields resolve to, in GiB. Root and home come back as the fixed value or the auto fill."""
+		free_gib = (space_mib - (swap_gib + root_gib + home_gib) * 1024) // 1024
+		root_auto = root_gib == 0
+		home_exists = bool(root_gib or home_gib)
+		home_auto = home_exists and home_gib == 0
+		return {
+			"free": free_gib,
+			"root": free_gib if root_auto else root_gib,
+			"home": (free_gib if home_auto else home_gib) if home_exists else None,
+			"unused": 0 if (root_auto or home_auto) else max(free_gib, 0),
+		}
 
 	def custom_error(self, space_mib: int, swap_gib: int, root_gib: int, home_gib: int) -> str:
 		"""Reason the custom sizes can't be used, or empty string if they can."""
 		if root_gib and self.filesystem == "btrfs":
 			return "A separate root needs ext4 or xfs. btrfs uses @ and @home"
-		free_gib = self.custom_free_gib(space_mib, swap_gib, root_gib, home_gib)
+		free_gib = self.custom_layout(space_mib, swap_gib, root_gib, home_gib)["free"]
 		if free_gib < 0:
 			return f"Sizes are {-free_gib} GB over the space available"
 		if root_gib and root_gib < MIN_DISK_GIB:

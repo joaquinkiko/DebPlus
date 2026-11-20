@@ -447,12 +447,17 @@ def disk(app):
 	      footer_text="  ↑↓ navigate  Enter select  WARNING: selected disk will be erased")
 
 
+def _reset_mode(config, manual=False):
+	"""Clear the partitioning mode flags before a new choice is applied."""
+	config.manual = manual
+	config.custom = False
+	config.free_space = False
+
+
 def _choose_disk(app, device):
 	app.config.disk = device
 	app.config.layout = {}
-	app.config.manual = False
-	app.config.custom = False
-	app.config.free_space = False
+	_reset_mode(app.config)
 	partition_mode(app)
 
 
@@ -467,9 +472,7 @@ def _manual_roles(boot_mode):
 
 
 def _set_automatic(app, swap_partition):
-	app.config.manual = False
-	app.config.custom = False
-	app.config.free_space = False
+	_reset_mode(app.config)
 	app.config.swap_partition = swap_partition
 	app.show_main()
 
@@ -515,6 +518,7 @@ def _free_space_problem(config):
 
 def custom_sizes(app, free_space=False):
 	config = app.config
+	boot_mib = utils.boot_reserve_mib(config.boot_mode)
 	if free_space:
 		region = utils.largest_free_region(config.disk)
 		if region is None:
@@ -522,11 +526,9 @@ def custom_sizes(app, free_space=False):
 			      _with_back(app, [urwid.Text(("error", "  No unallocated space on this disk"))]))
 			return
 		space_mib = region[1] - region[0]
-		boot_mib = 0
 		heading = f"  Free space: {space_mib // 1024} GB"
 	else:
 		disk_mib = utils.disk_bytes(config.disk) // 2**20
-		boot_mib = utils.ESP_END_MIB if config.boot_mode == "uefi" else utils.BIOS_BOOT_END_MIB
 		space_mib = disk_mib - boot_mib
 		heading = f"  Total disk size: {disk_mib // 1024} GB"
 	swap_edit = SubmitEdit("  Swap (GB, leave blank to not set): ", str(config.custom_swap_gib or ""))
@@ -543,24 +545,18 @@ def custom_sizes(app, free_space=False):
 		if None in (swap_gib, root_gib, home_gib):
 			summary.set_text(("error", "  Enter whole GB"))
 			return
-		free_gib = config.custom_free_gib(space_mib, swap_gib, root_gib, home_gib)
-		root_auto = root_gib == 0
-		home_exists = bool(root_gib or home_gib)
-		home_auto = home_exists and home_gib == 0
-		root_shown = free_gib if root_auto else root_gib
-		home_shown = free_gib if home_auto else home_gib
-		unused = 0 if (root_auto or home_auto) else max(free_gib, 0)
+		shown = config.custom_layout(space_mib, swap_gib, root_gib, home_gib)
 		lines = [] if free_space else [f"Boot: {boot_mib} MiB"]
 		if swap_gib:
 			lines.append(f"Swap: {swap_gib} GB")
-		lines.append(f"Root: {max(root_shown, 0)} GB")
-		if home_exists:
-			lines.append(f"Home: {max(home_shown, 0)} GB")
-		if unused:
-			lines.append(f"Left unformatted: {unused} GB")
-		if free_gib < 0:
-			lines.append(f"Over the space by {-free_gib} GB. Reduce a size.")
-		summary.set_text(("warning" if free_gib < 0 else "label",
+		lines.append(f"Root: {max(shown['root'], 0)} GB")
+		if shown["home"] is not None:
+			lines.append(f"Home: {max(shown['home'], 0)} GB")
+		if shown["unused"]:
+			lines.append(f"Left unformatted: {shown['unused']} GB")
+		if shown["free"] < 0:
+			lines.append(f"Over the space by {-shown['free']} GB. Reduce a size.")
+		summary.set_text(("warning" if shown["free"] < 0 else "label",
 		                  "\n".join(f"  {line}" for line in lines)))
 
 	def accept(_=None):
@@ -574,9 +570,9 @@ def custom_sizes(app, free_space=False):
 		if problem:
 			_show_error(error_text, problem)
 			return
+		_reset_mode(config)
 		config.custom = True
 		config.free_space = free_space
-		config.manual = False
 		config.custom_swap_gib = swap_gib
 		config.custom_root_gib = root_gib
 		config.custom_home_gib = home_gib
@@ -649,9 +645,7 @@ def _finish_manual(app):
 
 def partition_layout(app, error=""):
 	config = app.config
-	config.manual = True
-	config.custom = False
-	config.free_space = False
+	_reset_mode(config, manual=True)
 	partitions = utils.partition_rows(config.disk)
 	items = []
 	for role, label in _manual_roles(config.boot_mode):

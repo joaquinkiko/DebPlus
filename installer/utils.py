@@ -279,6 +279,11 @@ def has_bios_grub(disk):
 	return "bios_grub" in run(["parted", "-sm", disk, "print"]).stdout
 
 
+def boot_reserve_mib(boot_mode):
+	"""MiB taken by the boot partition at the start of the disk."""
+	return ESP_END_MIB if boot_mode == "uefi" else BIOS_BOOT_END_MIB
+
+
 def detect_boot_mode():
 	return "uefi" if os.path.isdir("/sys/firmware/efi") else "bios"
 

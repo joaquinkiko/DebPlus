@@ -297,18 +297,17 @@ def _partition_custom(config: Config):
 	boot_roles, boot_args, boot_end_mib = _boot_partition(config.boot_mode == BOOT_UEFI)
 	disk_mib = utils.disk_bytes(config.disk) // 2**20
 	segments = _custom_segments(config, boot_end_mib, disk_mib, disk_mib)
-	parted_args = ["mklabel", "gpt", *boot_args]
-	for role, parted_type, start, end in segments:
-		parted_args += ["mkpart", role, parted_type, start, end]
 	roles = [*boot_roles, *(role for role, *_rest in segments)]
-	_apply_partitions(config, roles, parted_args)
+	_apply_partitions(config, roles, ["mklabel", "gpt", *boot_args, *_mkpart_args("gpt", segments)])
 
 
-def _mkpart_args(label, role, parted_type, start, end):
-	"""mkpart arguments. GPT takes a name, MBR takes a primary type first."""
-	if label == "gpt":
-		return ["mkpart", role, parted_type, start, end]
-	return ["mkpart", "primary", parted_type, start, end]
+def _mkpart_args(label, segments):
+	"""parted mkpart arguments for (role, type, start, end) segments. MBR has no names, so each is primary."""
+	args = []
+	for role, parted_type, start, end in segments:
+		name = role if label == "gpt" else "primary"
+		args += ["mkpart", name, parted_type, start, end]
+	return args
 
 
 def _wait_for_new_partitions(disk, existing, expected, attempts=10):
@@ -332,11 +331,8 @@ def _partition_free_space(config: Config):
 		die("No EFI system partition found on the disk.")
 	label = utils.partition_table_type(config.disk)
 	segments = _custom_segments(config, start_mib, end_mib, disk_mib)
-	parted_args = []
-	for role, parted_type, start, end in segments:
-		parted_args += _mkpart_args(label, role, parted_type, start, end)
 	existing = get_partitions(config.disk)
-	_run(["parted", "-s", config.disk, *parted_args], quiet=True)
+	_run(["parted", "-s", config.disk, *_mkpart_args(label, segments)], quiet=True)
 	created = _wait_for_new_partitions(config.disk, existing, len(segments))
 	config.layout = {role: {"device": device, "format": True}
 	                 for (role, *_rest), device in zip(segments, created)}
