@@ -27,6 +27,7 @@ FIX_LABELS = {"network": "Fix network", "disk": "Choose another disk",
 FORMAT_DEFAULT = {"root": True, "home": True, "swap": True,
                   "esp": True, "bios_grub": False}
 LOCALE_RESULT_LIMIT = 40
+DEFAULT_ROOT_GIB = 30
 RESERVED_USERNAMES = {"root", "daemon", "bin", "sys", "sync", "games", "man", "lp",
                       "mail", "news", "uucp", "proxy", "www-data", "backup", "list",
                       "irc", "gnats", "nobody", "messagebus", "sshd", "_apt"}
@@ -450,6 +451,7 @@ def _choose_disk(app, device):
 	app.config.disk = device
 	app.config.layout = {}
 	app.config.manual = False
+	app.config.custom = False
 	partition_mode(app)
 
 
@@ -465,6 +467,7 @@ def _manual_roles(boot_mode):
 
 def _set_automatic(app, swap_partition):
 	app.config.manual = False
+	app.config.custom = False
 	app.config.swap_partition = swap_partition
 	app.show_main()
 
@@ -475,6 +478,8 @@ def partition_mode(app):
 		 lambda: _set_automatic(app, True)),
 		("Automatic without swap", "Erase the whole disk. No swap partition is created.",
 		 lambda: _set_automatic(app, False)),
+		("Custom sizes", "Erase the whole disk. Set swap and an optional separate root. Home takes the rest.",
+		 lambda: custom_sizes(app)),
 		("Manual", "Use existing partitions. Only the ones you pick are formatted.",
 		 lambda: partition_layout(app)),
 	]
@@ -482,6 +487,87 @@ def partition_mode(app):
 	for title, description, callback in modes:
 		items += _described(_action(("bold", f"  {title}"), lambda _, cb=callback: cb()), description)
 	_open(app, "Partitioning", items + [_back_button(app)])
+
+
+def _parse_gib(text):
+	"""Whole GB from text, 0 if blank, or None if it isn't a whole number."""
+	text = text.strip()
+	if not text:
+		return 0
+	return int(text) if text.isdigit() else None
+
+
+def custom_sizes(app):
+	config = app.config
+	disk_gib = utils.disk_bytes(config.disk) // 2**30
+	boot_mib = utils.ESP_END_MIB if config.boot_mode == "uefi" else utils.BIOS_BOOT_END_MIB
+	swap_edit = SubmitEdit("  Swap (GB, leave blank to not set): ", str(config.custom_swap_gib or ""))
+	root_edit = SubmitEdit("  Root (GB, leave blank to not set): ", str(config.custom_root_gib or ""))
+	home_edit = SubmitEdit("  Home (GB, leave blank to fill the rest): ", str(config.custom_home_gib or ""))
+	summary = urwid.Text("")
+	error_text = urwid.Text("")
+
+	def read_sizes():
+		return tuple(_parse_gib(edit.edit_text) for edit in (swap_edit, root_edit, home_edit))
+
+	def refresh(*_):
+		swap_gib, root_gib, home_gib = read_sizes()
+		if None in (swap_gib, root_gib, home_gib):
+			summary.set_text(("error", "  Enter whole GB"))
+			return
+		free_gib = config.custom_free_gib(disk_gib, swap_gib, root_gib, home_gib)
+		root_auto = root_gib == 0
+		home_exists = bool(root_gib or home_gib)
+		home_auto = home_exists and home_gib == 0
+		root_shown = free_gib if root_auto else root_gib
+		home_shown = free_gib if home_auto else home_gib
+		unformatted = 0 if (root_auto or home_auto) else max(free_gib, 0)
+		lines = [f"Boot: {boot_mib} MiB"]
+		if swap_gib:
+			lines.append(f"Swap: {swap_gib} GB")
+		lines.append(f"Root: {max(root_shown, 0)} GB")
+		if home_exists:
+			lines.append(f"Home: {max(home_shown, 0)} GB")
+		if unformatted:
+			lines.append(f"Unformatted: {unformatted} GB")
+		if free_gib < 0:
+			lines.append(f"Over the disk by {-free_gib} GB. Reduce a size.")
+		summary.set_text(("warning" if free_gib < 0 else "label",
+		                  "\n".join(f"  {line}" for line in lines)))
+
+	def accept(_=None):
+		swap_gib, root_gib, home_gib = read_sizes()
+		if None in (swap_gib, root_gib, home_gib):
+			_show_error(error_text, "Sizes must be whole numbers of GB")
+			return
+		problem = config.custom_error(disk_gib, swap_gib, root_gib, home_gib)
+		if problem:
+			_show_error(error_text, problem)
+			return
+		config.custom = True
+		config.manual = False
+		config.custom_swap_gib = swap_gib
+		config.custom_root_gib = root_gib
+		config.custom_home_gib = home_gib
+		app.show_main()
+
+	for edit in (swap_edit, root_edit, home_edit):
+		urwid.connect_signal(edit, "postchange", refresh)
+	refresh()
+	items = [
+		urwid.Text(("value", f"  Total disk size: {disk_gib} GB")),
+		urwid.Divider(),
+		swap_edit,
+		root_edit,
+		home_edit,
+		urwid.Divider(),
+		summary,
+		error_text,
+		urwid.Divider(),
+		_action(("bold", "  Accept"), accept),
+	]
+	_form_screen(app, "Custom Sizes", _with_back(app, items),
+	             [swap_edit, root_edit, home_edit], accept)
 
 
 def _assign(app, role, device):
@@ -516,6 +602,7 @@ def _finish_manual(app):
 def partition_layout(app, error=""):
 	config = app.config
 	config.manual = True
+	config.custom = False
 	partitions = utils.partition_rows(config.disk)
 	items = []
 	for role, label in _manual_roles(config.boot_mode):
@@ -546,6 +633,8 @@ def _choose_filesystem(app, name):
 	app.config.filesystem = name
 	if name != "btrfs":
 		app.config.snapper = False
+	else:
+		app.config.custom_root_gib = 0  # separate root needs ext4 or xfs
 	filesystem(app)
 
 
@@ -604,7 +693,8 @@ def luks_passphrase(app):
 		urwid.Text(("warning", "  Losing this passphrase means losing the data. There is no recovery.")),
 		urwid.Text(("label", "  You type it at every boot, using the keyboard layout you chose.")),
 	]
-	if app.config.manual and "home" in app.config.layout:
+	if (app.config.custom and (app.config.custom_root_gib or app.config.custom_home_gib)) or (
+			app.config.manual and "home" in app.config.layout):
 		items.append(urwid.Text(("warning", "  Your separate home partition will not be encrypted.")))
 	items += [
 		urwid.Divider(),

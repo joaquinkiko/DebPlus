@@ -16,7 +16,8 @@ import time
 
 from . import utils
 from .config import Config
-from .utils import MNT, MIRROR, PROFILE, get_partitions, keyboard_config
+from .utils import (MNT, MIRROR, PROFILE, BIOS_BOOT_END_MIB, ESP_END_MIB,
+                    get_partitions, keyboard_config)
 
 BOLD = "\033[1m"
 RED = "\033[0;31m"
@@ -45,8 +46,6 @@ FSTAB_OPTIONS = {
 	"xfs": "defaults",
 }
 FIRST_PARTITION_START = "1MiB"
-ESP_END = "513MiB"
-BIOS_BOOT_END = "2MiB"
 
 LOG_PATH = "/var/log/debplus/install.log"
 STATE_PATH = "/run/debplus/state"
@@ -229,36 +228,79 @@ def _wait_for_partitions(disk, expected, attempts=10):
 	die(f"Expected {expected} partitions on {disk}, found {len(parts)}")
 
 
-def _partition_auto(config: Config):
-	uefi = config.boot_mode == BOOT_UEFI
-	disk_mib = utils.disk_bytes(config.disk) // 2**20
-	disk_gib = disk_mib // 1024
-	ram_gib = math.ceil(utils.ram_mib() / 1024)
-	swap_gib = config.swap_gib(ram_gib, disk_gib) if config.has_swap_partition() else 0
-	swap_start = f"{disk_mib - swap_gib * 1024}MiB"
-
-	parted_args = ["mklabel", "gpt"]
+def _boot_partition(uefi):
+	"""Roles, parted args and end in MiB of the boot partition, which always starts the disk."""
 	if uefi:
-		roles = ["esp", "root"]
-		parted_args += ["mkpart", "ESP", "fat32", FIRST_PARTITION_START, ESP_END,
-		                "set", "1", "esp", "on"]
-		root_start = ESP_END
-	else:
-		roles = ["bios_grub", "root"]
-		parted_args += ["mkpart", "bios_grub", FIRST_PARTITION_START, BIOS_BOOT_END,
-		                "set", "1", "bios_grub", "on"]
-		root_start = BIOS_BOOT_END
-	root_end = swap_start if swap_gib else "100%"
-	parted_args += ["mkpart", "root", PARTED_FS_HINT[config.filesystem], root_start, root_end]
-	if swap_gib:
-		roles.append("swap")
-		parted_args += ["mkpart", "swap", "linux-swap", swap_start, "100%"]
+		return (["esp"],
+		        ["mkpart", "ESP", "fat32", FIRST_PARTITION_START, f"{ESP_END_MIB}MiB",
+		         "set", "1", "esp", "on"],
+		        ESP_END_MIB)
+	return (["bios_grub"],
+	        ["mkpart", "bios_grub", FIRST_PARTITION_START, f"{BIOS_BOOT_END_MIB}MiB",
+	         "set", "1", "bios_grub", "on"],
+	        BIOS_BOOT_END_MIB)
 
+
+def _apply_partitions(config: Config, roles, parted_args):
 	_run(["wipefs", "-af", config.disk], quiet=True)
 	_run(["parted", "-s", config.disk, *parted_args], quiet=True)
 	partitions = _wait_for_partitions(config.disk, len(roles))
 	config.layout = {role: {"device": device, "format": role != "bios_grub"}
 	                 for role, device in zip(roles, partitions)}
+
+
+def _partition_auto(config: Config):
+	disk_mib = utils.disk_bytes(config.disk) // 2**20
+	disk_gib = disk_mib // 1024
+	ram_gib = math.ceil(utils.ram_mib() / 1024)
+	swap_gib = config.swap_gib(ram_gib, disk_gib) if config.has_swap_partition() else 0
+	swap_start = f"{disk_mib - swap_gib * 1024}MiB"
+	boot_roles, boot_args, boot_end_mib = _boot_partition(config.boot_mode == BOOT_UEFI)
+
+	parted_args = ["mklabel", "gpt", *boot_args, "mkpart", "root",
+	               PARTED_FS_HINT[config.filesystem], f"{boot_end_mib}MiB",
+	               swap_start if swap_gib else "100%"]
+	roles = [*boot_roles, "root"]
+	if swap_gib:
+		roles.append("swap")
+		parted_args += ["mkpart", "swap", "linux-swap", swap_start, "100%"]
+	_apply_partitions(config, roles, parted_args)
+
+
+def _partition_custom(config: Config):
+	boot_roles, boot_args, boot_end_mib = _boot_partition(config.boot_mode == BOOT_UEFI)
+	disk_mib = utils.disk_bytes(config.disk) // 2**20
+	swap_gib = config.custom_swap_gib
+	root_gib = config.custom_root_gib
+	home_gib = config.custom_home_gib
+	# Swap sits at the end of the disk. Root and home fill inward from the boot partition.
+	avail_end_mib = disk_mib - swap_gib * 1024
+	swap_start = f"{avail_end_mib}MiB"
+
+	def end_arg(end_mib):
+		if end_mib != avail_end_mib:
+			return f"{end_mib}MiB"
+		return swap_start if swap_gib else "100%"
+
+	if root_gib:
+		root_end_mib = boot_end_mib + root_gib * 1024
+	elif home_gib:
+		root_end_mib = avail_end_mib - home_gib * 1024
+	else:
+		root_end_mib = avail_end_mib
+	fs_hint = PARTED_FS_HINT[config.filesystem]
+	segments = [("root", fs_hint, f"{boot_end_mib}MiB", end_arg(root_end_mib))]
+	if root_gib or home_gib:
+		home_end_mib = root_end_mib + home_gib * 1024 if home_gib else avail_end_mib
+		segments.append(("home", fs_hint, f"{root_end_mib}MiB", end_arg(home_end_mib)))
+	if swap_gib:
+		segments.append(("swap", "linux-swap", swap_start, "100%"))
+
+	parted_args = ["mklabel", "gpt", *boot_args]
+	for role, parted_type, start, end in segments:
+		parted_args += ["mkpart", role, parted_type, start, end]
+	roles = [*boot_roles, *(role for role, *_rest in segments)]
+	_apply_partitions(config, roles, parted_args)
 
 
 def _format_layout(config: Config):
@@ -358,7 +400,10 @@ def partition_disk(config: Config):
 		msg("Using selected partitions...")
 	else:
 		msg(f"Partitioning {config.disk}...")
-		_partition_auto(config)
+		if config.custom:
+			_partition_custom(config)
+		else:
+			_partition_auto(config)
 	if config.luks:
 		_encrypt_layout(config)
 	_format_layout(config)

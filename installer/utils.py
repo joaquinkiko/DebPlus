@@ -44,11 +44,14 @@ ZONE_REGIONS = ("Africa", "America", "Antarctica", "Asia", "Atlantic",
 MIN_RAM_MIB = 1024
 WARN_RAM_MIB = 2048
 MIN_DISK_GIB = 10
+MIN_HOME_GIB = 5
 WARN_DISK_GIB = 20
 REQUIRED_TOOLS = ("unsquashfs", "parted", "wipefs", "partprobe", "blkid",
                   "lsblk", "chroot", "mkfs.fat", "mkfs.ext4", "mkfs.btrfs",
                   "mkfs.xfs", "mokutil", "timedatectl", "cryptsetup")
 ESP_RESERVE_GIB = 1
+ESP_END_MIB = 513
+BIOS_BOOT_END_MIB = 2
 
 TIMEZONE_LOOKUPS = (
 	("https://ipinfo.io/timezone", ()),
