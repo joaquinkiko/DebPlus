@@ -980,20 +980,32 @@ def software(app):
 	_extras_screen(app, "software", "Software")
 
 
-def hardware_detect(app, detections, matched):
+def detect_rows(detections, auto):
+	"""Widgets listing detected hardware and the packages ticked for it."""
 	labels = {package: label for _menu, _section, package, label, _requires in utils.extras_rows()}
 	found = sorted({trigger if identifier == "*" else f"{trigger} {identifier}"
 	                for trigger, identifier in detections})
-	items = [urwid.Text(("label", f"  Detected: {', '.join(found) or 'nothing'}")),
-	         urwid.Divider()]
-	if matched:
-		items.append(urwid.Text(("success", "  Ticked in Hardware:")))
-		items += [urwid.Text(("value", f"    {labels.get(package, package)}"))
-		          for package in matched]
+	rows = [urwid.Text(("label", f"  Detected: {', '.join(found) or 'nothing'}"))]
+	if auto:
+		rows.append(urwid.Text(("success", "  Ticked in Hardware:")))
+		rows += [urwid.Text(("value", f"    {labels.get(package, package)}"))
+		         for package in auto]
 	else:
-		items.append(urwid.Text(("label", "  No matching hardware found.")))
-	items += [urwid.Divider(), urwid.Text(("label", "  Adjust anything under Hardware."))]
-	_open(app, "Hardware Detect", _with_back(app, items))
+		rows.append(urwid.Text(("label", "  Nothing ticked in Hardware.")))
+	return rows + [urwid.Divider()]
+
+
+def warning_rows(checks):
+	"""Pre-flight issues as plain text. No fix actions here; those stay on the Pre-flight step."""
+	rows = []
+	for check in checks:
+		if check.level == "ok":
+			continue
+		style = "error" if check.level == "block" else "warning"
+		rows.append(urwid.Text([(style, f"  {check.title}: "), ("label", check.message)]))
+	if not rows:
+		rows.append(urwid.Text(("success", "  Pre-flight: all checks passed")))
+	return rows + [urwid.Divider()]
 
 
 # ── Secure Boot ────────────────────────────────────────────────────────

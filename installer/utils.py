@@ -504,15 +504,20 @@ def extras_rows():
 
 
 def autodetect_rows():
-	"""(trigger, match, package) per detection rule. match is a vendor id, '*', or blank."""
+	"""(trigger, match, package, mode) per rule. mode is 'add' or 'suggest'."""
 	return _rows(AUTODETECT_PATH)
 
 
 def autodetect_problems():
-	"""Messages for autodetect rows whose package is not an extras.list row."""
+	"""Messages for autodetect rows with an unknown package or mode."""
 	extras_packages = {package for _menu, _section, package, _label, _requires in extras_rows()}
-	return [f"autodetect.list: no extras.list row for '{package}'"
-	        for _trigger, _match, package in autodetect_rows() if package not in extras_packages]
+	problems = []
+	for _trigger, _match, package, mode in autodetect_rows():
+		if package not in extras_packages:
+			problems.append(f"autodetect.list: no extras.list row for '{package}'")
+		if mode not in ("add", "suggest"):
+			problems.append(f"autodetect.list: unknown mode '{mode}' for '{package}'")
+	return problems
 
 
 def mirror_rows():

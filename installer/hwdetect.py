@@ -93,26 +93,34 @@ def detect(root="/"):
 	return [(trigger, identifier) for trigger, identifier in found if identifier]
 
 
-def matched_packages(detections):
-	"""Packages from autodetect.list whose trigger and vendor match a detection, without repeats."""
-	packages = []
-	for row_trigger, row_match, package in utils.autodetect_rows():
-		hit = any(row_trigger == trigger and row_match.lower() in ("*", identifier)
-		          for trigger, identifier in detections)
-		if hit and package not in packages:
-			packages.append(package)
-	return packages
+def plan(detections):
+	"""(auto, suggestions): packages to add now, and (package, label) pairs offered as checkboxes."""
+	labels = {package: label for _menu, _section, package, label, _requires in utils.extras_rows()}
+	auto = []
+	suggestions = []
+	for row_trigger, row_match, package, mode in utils.autodetect_rows():
+		hit = row_trigger == "always" or any(
+			row_trigger == trigger and row_match.lower() in ("*", identifier)
+			for trigger, identifier in detections)
+		if not hit:
+			continue
+		if mode == "add":
+			if package not in auto:
+				auto.append(package)
+		elif package not in [entry for entry, _label in suggestions]:
+			suggestions.append((package, labels.get(package, package)))
+	return auto, suggestions
 
 
-def apply(config, detections):
-	"""Tick matched packages and the components they need. Returns the matched packages."""
+def apply(config, packages):
+	"""Add packages to hardware, ticking the components and multiarch they need."""
 	component_ids = {component_id for component_id, _label, _description in utils.components_rows()}
 	requirements = utils.package_requirements()
-	matched = matched_packages(detections)
-	for package in matched:
+	for package in packages:
 		if package not in config.hardware_packages:
 			config.hardware_packages.append(package)
 		for requirement in requirements.get(package, "-").split(","):
 			if requirement in component_ids and requirement not in config.components:
 				config.components.append(requirement)
-	return matched
+			elif requirement == "i386":
+				config.multiarch_i386 = True
