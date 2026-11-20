@@ -452,6 +452,7 @@ def _choose_disk(app, device):
 	app.config.layout = {}
 	app.config.manual = False
 	app.config.custom = False
+	app.config.free_space = False
 	partition_mode(app)
 
 
@@ -468,6 +469,7 @@ def _manual_roles(boot_mode):
 def _set_automatic(app, swap_partition):
 	app.config.manual = False
 	app.config.custom = False
+	app.config.free_space = False
 	app.config.swap_partition = swap_partition
 	app.show_main()
 
@@ -480,6 +482,8 @@ def partition_mode(app):
 		 lambda: _set_automatic(app, False)),
 		("Custom sizes", "Erase the whole disk. Set swap and an optional separate root. Home takes the rest.",
 		 lambda: custom_sizes(app)),
+		("Free space (dual boot)", "Install into unallocated space. Existing partitions are kept.",
+		 lambda: custom_sizes(app, free_space=True)),
 		("Manual", "Use existing partitions. Only the ones you pick are formatted.",
 		 lambda: partition_layout(app)),
 	]
@@ -497,10 +501,34 @@ def _parse_gib(text):
 	return int(text) if text.isdigit() else None
 
 
-def custom_sizes(app):
+def _free_space_problem(config):
+	"""Reason free space can't be used on this disk, or empty string if it can."""
+	label = utils.partition_table_type(config.disk)
+	if not label:
+		return "This disk has no partition table. Use Automatic"
+	if config.boot_mode == "uefi" and not utils.find_esp(config.disk):
+		return "No EFI system partition found. Use Automatic or Manual"
+	if config.boot_mode == "bios" and label == "gpt" and not utils.has_bios_grub(config.disk):
+		return "GPT on BIOS needs a BIOS boot partition. Use Automatic or Manual"
+	return ""
+
+
+def custom_sizes(app, free_space=False):
 	config = app.config
-	disk_gib = utils.disk_bytes(config.disk) // 2**30
-	boot_mib = utils.ESP_END_MIB if config.boot_mode == "uefi" else utils.BIOS_BOOT_END_MIB
+	if free_space:
+		region = utils.largest_free_region(config.disk)
+		if region is None:
+			_open(app, "Custom Sizes",
+			      _with_back(app, [urwid.Text(("error", "  No unallocated space on this disk"))]))
+			return
+		space_mib = region[1] - region[0]
+		boot_mib = 0
+		heading = f"  Free space: {space_mib // 1024} GB"
+	else:
+		disk_mib = utils.disk_bytes(config.disk) // 2**20
+		boot_mib = utils.ESP_END_MIB if config.boot_mode == "uefi" else utils.BIOS_BOOT_END_MIB
+		space_mib = disk_mib - boot_mib
+		heading = f"  Total disk size: {disk_mib // 1024} GB"
 	swap_edit = SubmitEdit("  Swap (GB, leave blank to not set): ", str(config.custom_swap_gib or ""))
 	root_edit = SubmitEdit("  Root (GB, leave blank to not set): ", str(config.custom_root_gib or ""))
 	home_edit = SubmitEdit("  Home (GB, leave blank to fill the rest): ", str(config.custom_home_gib or ""))
@@ -515,23 +543,23 @@ def custom_sizes(app):
 		if None in (swap_gib, root_gib, home_gib):
 			summary.set_text(("error", "  Enter whole GB"))
 			return
-		free_gib = config.custom_free_gib(disk_gib, swap_gib, root_gib, home_gib)
+		free_gib = config.custom_free_gib(space_mib, swap_gib, root_gib, home_gib)
 		root_auto = root_gib == 0
 		home_exists = bool(root_gib or home_gib)
 		home_auto = home_exists and home_gib == 0
 		root_shown = free_gib if root_auto else root_gib
 		home_shown = free_gib if home_auto else home_gib
-		unformatted = 0 if (root_auto or home_auto) else max(free_gib, 0)
-		lines = [f"Boot: {boot_mib} MiB"]
+		unused = 0 if (root_auto or home_auto) else max(free_gib, 0)
+		lines = [] if free_space else [f"Boot: {boot_mib} MiB"]
 		if swap_gib:
 			lines.append(f"Swap: {swap_gib} GB")
 		lines.append(f"Root: {max(root_shown, 0)} GB")
 		if home_exists:
 			lines.append(f"Home: {max(home_shown, 0)} GB")
-		if unformatted:
-			lines.append(f"Unformatted: {unformatted} GB")
+		if unused:
+			lines.append(f"Left unformatted: {unused} GB")
 		if free_gib < 0:
-			lines.append(f"Over the disk by {-free_gib} GB. Reduce a size.")
+			lines.append(f"Over the space by {-free_gib} GB. Reduce a size.")
 		summary.set_text(("warning" if free_gib < 0 else "label",
 		                  "\n".join(f"  {line}" for line in lines)))
 
@@ -540,11 +568,14 @@ def custom_sizes(app):
 		if None in (swap_gib, root_gib, home_gib):
 			_show_error(error_text, "Sizes must be whole numbers of GB")
 			return
-		problem = config.custom_error(disk_gib, swap_gib, root_gib, home_gib)
+		problem = config.custom_error(space_mib, swap_gib, root_gib, home_gib)
+		if not problem and free_space:
+			problem = _free_space_problem(config)
 		if problem:
 			_show_error(error_text, problem)
 			return
 		config.custom = True
+		config.free_space = free_space
 		config.manual = False
 		config.custom_swap_gib = swap_gib
 		config.custom_root_gib = root_gib
@@ -554,9 +585,15 @@ def custom_sizes(app):
 	for edit in (swap_edit, root_edit, home_edit):
 		urwid.connect_signal(edit, "postchange", refresh)
 	refresh()
-	items = [
-		urwid.Text(("value", f"  Total disk size: {disk_gib} GB")),
+	notes = [
+		urwid.Text(("warning", "  Windows: turn off Fast Startup and hibernation first.")),
+		urwid.Text(("warning", "  BitLocker: suspend it and keep the recovery key handy.")),
 		urwid.Divider(),
+	] if free_space else []
+	items = [
+		urwid.Text(("value", heading)),
+		urwid.Divider(),
+		*notes,
 		swap_edit,
 		root_edit,
 		home_edit,
@@ -570,6 +607,14 @@ def custom_sizes(app):
 	             [swap_edit, root_edit, home_edit], accept)
 
 
+def _default_format(disk, role, device):
+	"""An existing FAT EFI partition is kept unformatted so other systems' boot files survive."""
+	if role != "esp":
+		return FORMAT_DEFAULT[role]
+	filesystem = next((fs for part, _size, fs in utils.partition_rows(disk) if part == device), "")
+	return filesystem != "vfat"
+
+
 def _assign(app, role, device):
 	layout = app.config.layout
 	for other_role in [name for name, part in layout.items() if part["device"] == device]:
@@ -577,7 +622,7 @@ def _assign(app, role, device):
 	if device is None:
 		layout.pop(role, None)
 	else:
-		layout[role] = {"device": device, "format": FORMAT_DEFAULT[role]}
+		layout[role] = {"device": device, "format": _default_format(app.config.disk, role, device)}
 	partition_layout(app)
 
 
@@ -586,12 +631,15 @@ def _finish_manual(app):
 	if not config.layout_ready():
 		partition_layout(app, "Choose a root partition, and an EFI partition on UEFI.")
 		return
+	filesystems = {device: fs for device, _size, fs in utils.partition_rows(config.disk)}
+	esp = config.layout.get("esp")
+	if esp and not esp["format"] and filesystems.get(esp["device"]) != "vfat":
+		partition_layout(app, "EFI partition is not FAT. Tick Format for it.")
+		return
 	home = config.layout.get("home")
-	if home and not home["format"]:
-		filesystems = {device: fs for device, _size, fs in utils.partition_rows(config.disk)}
-		if filesystems.get(home["device"], "unformatted") == "unformatted":
-			partition_layout(app, "Home has no filesystem. Tick Format for it.")
-			return
+	if home and not home["format"] and filesystems.get(home["device"], "unformatted") == "unformatted":
+		partition_layout(app, "Home has no filesystem. Tick Format for it.")
+		return
 	if (config.boot_mode == "bios" and "bios_grub" not in config.layout
 	        and utils.partition_table_type(config.disk) == "gpt"):
 		partition_layout(app, "This disk uses GPT, so it needs a BIOS boot partition.")
@@ -603,6 +651,7 @@ def partition_layout(app, error=""):
 	config = app.config
 	config.manual = True
 	config.custom = False
+	config.free_space = False
 	partitions = utils.partition_rows(config.disk)
 	items = []
 	for role, label in _manual_roles(config.boot_mode):
@@ -613,7 +662,7 @@ def partition_layout(app, error=""):
 			items.append(_action(f"  {marker} {device:<16}{size:<9}{filesystem}",
 			                     lambda _, r=role, d=device: _assign(app, r, d)))
 		items.append(_action("    None", lambda _, r=role: _assign(app, r, None)))
-		if role == "home" and selected:
+		if role in ("home", "esp") and selected:
 			items.append(urwid.CheckBox(
 				"    Format (erases this partition)", state=selected["format"],
 				on_state_change=_on_format, user_data=(app, role)))

@@ -4,6 +4,7 @@
 
 import functools
 import json
+import math
 import os
 import re
 import shutil
@@ -254,6 +255,29 @@ def get_disks():
 
 
 # ── Boot and secure boot ───────────────────────────────────────────────
+
+def largest_free_region(disk):
+	"""(start_mib, end_mib) of the largest unallocated gap on disk, or None."""
+	gaps = []
+	for line in run(["parted", "-sm", disk, "unit", "MiB", "print", "free"]).stdout.splitlines():
+		fields = line.rstrip(";").split(":")
+		if len(fields) >= 5 and fields[4] == "free":
+			start = math.ceil(float(fields[1].removesuffix("MiB")))
+			end = math.floor(float(fields[2].removesuffix("MiB")))
+			gaps.append((end - start, start, end))
+	size, start, end = max(gaps, default=(0, 0, 0))
+	return (start, end) if size > 0 else None
+
+
+def find_esp(disk):
+	"""Device of the first FAT partition, the EFI system partition on a UEFI disk, or None."""
+	return next((device for device, _size, filesystem in partition_rows(disk)
+	             if filesystem == "vfat"), None)
+
+
+def has_bios_grub(disk):
+	return "bios_grub" in run(["parted", "-sm", disk, "print"]).stdout
+
 
 def detect_boot_mode():
 	return "uefi" if os.path.isdir("/sys/firmware/efi") else "bios"

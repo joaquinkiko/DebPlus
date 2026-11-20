@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 
-from .utils import (BIOS_BOOT_END_MIB, ESP_END_MIB, ESP_RESERVE_GIB, MIN_DISK_GIB,
-                    MIN_HOME_GIB, dkms_packages)
+from .utils import ESP_RESERVE_GIB, MIN_DISK_GIB, MIN_HOME_GIB, dkms_packages
 
 # Fields that must be set before Install unlocks. Everything else is optional.
 REQUIRED_FIELDS = (
@@ -37,6 +36,8 @@ class Config:
 	snapper: bool = False  # btrfs only
 	auto_updates: bool = True  # daily security upgrades via unattended-upgrades
 	manual: bool = False
+	free_space: bool = False  # install into unallocated space, keeping existing partitions
+	dual_boot: bool = False  # other systems may be present. Set during partitioning
 	custom: bool = False  # custom sizes from the Partitioning screen
 	custom_swap_gib: int = 0  # 0 means no swap partition
 	custom_root_gib: int = 0  # 0 means not set: one root that takes the rest
@@ -79,21 +80,22 @@ class Config:
 	def erase_text(self) -> str:
 		if self.manual:
 			return "Only the selected partitions will be formatted"
+		if self.free_space:
+			return f"Only unallocated space on {self.disk} will be used"
 		return f"All data on {self.disk} will be erased"
 
-	def custom_free_gib(self, disk_gib: int, swap_gib: int, root_gib: int, home_gib: int) -> int:
-		"""GiB left after boot, swap, and any fixed root or home. Negative means over the disk."""
-		boot_mib = ESP_END_MIB if self.boot_mode == "uefi" else BIOS_BOOT_END_MIB
+	def custom_free_gib(self, space_mib: int, swap_gib: int, root_gib: int, home_gib: int) -> int:
+		"""GiB left in space_mib after swap and any fixed root or home. Negative means over."""
 		used_mib = (swap_gib + root_gib + home_gib) * 1024
-		return (disk_gib * 1024 - boot_mib - used_mib) // 1024
+		return (space_mib - used_mib) // 1024
 
-	def custom_error(self, disk_gib: int, swap_gib: int, root_gib: int, home_gib: int) -> str:
+	def custom_error(self, space_mib: int, swap_gib: int, root_gib: int, home_gib: int) -> str:
 		"""Reason the custom sizes can't be used, or empty string if they can."""
 		if root_gib and self.filesystem == "btrfs":
 			return "A separate root needs ext4 or xfs. btrfs uses @ and @home"
-		free_gib = self.custom_free_gib(disk_gib, swap_gib, root_gib, home_gib)
+		free_gib = self.custom_free_gib(space_mib, swap_gib, root_gib, home_gib)
 		if free_gib < 0:
-			return f"Sizes are {-free_gib} GB over the disk"
+			return f"Sizes are {-free_gib} GB over the space available"
 		if root_gib and root_gib < MIN_DISK_GIB:
 			return f"Root must be at least {MIN_DISK_GIB} GB"
 		if home_gib and home_gib < MIN_HOME_GIB:
@@ -103,6 +105,11 @@ class Config:
 		if root_gib and not home_gib and free_gib < MIN_HOME_GIB:
 			return f"Home would be {free_gib} GB. Make root or swap smaller"
 		return ""
+
+	def shared_esp(self) -> bool:
+		"""EFI partition is kept without formatting, so other bootloaders may share it."""
+		esp = self.layout.get("esp")
+		return bool(esp) and not esp["format"]
 
 	def missing_count(self) -> int:
 		missing = sum(1 for name in REQUIRED_FIELDS if not getattr(self, name))

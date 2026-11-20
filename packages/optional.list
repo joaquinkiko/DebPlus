@@ -4,3 +4,4 @@ cryptsetup-initramfs|luks
 snapper|snapper
 unattended-upgrades|auto_updates
 systemd-zram-generator|zram
+os-prober|dual_boot

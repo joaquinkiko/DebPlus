@@ -267,40 +267,81 @@ def _partition_auto(config: Config):
 	_apply_partitions(config, roles, parted_args)
 
 
-def _partition_custom(config: Config):
-	boot_roles, boot_args, boot_end_mib = _boot_partition(config.boot_mode == BOOT_UEFI)
-	disk_mib = utils.disk_bytes(config.disk) // 2**20
+def _custom_segments(config: Config, first_mib, last_mib, disk_mib):
+	"""(role, parted type, start, end) for custom sizes filling first_mib to last_mib. Swap sits last."""
 	swap_gib = config.custom_swap_gib
 	root_gib = config.custom_root_gib
 	home_gib = config.custom_home_gib
-	# Swap sits at the end of the disk. Root and home fill inward from the boot partition.
-	avail_end_mib = disk_mib - swap_gib * 1024
-	swap_start = f"{avail_end_mib}MiB"
+	avail_end_mib = last_mib - swap_gib * 1024
 
 	def end_arg(end_mib):
-		if end_mib != avail_end_mib:
-			return f"{end_mib}MiB"
-		return swap_start if swap_gib else "100%"
+		return "100%" if end_mib == last_mib == disk_mib else f"{end_mib}MiB"
 
 	if root_gib:
-		root_end_mib = boot_end_mib + root_gib * 1024
+		root_end_mib = first_mib + root_gib * 1024
 	elif home_gib:
 		root_end_mib = avail_end_mib - home_gib * 1024
 	else:
 		root_end_mib = avail_end_mib
 	fs_hint = PARTED_FS_HINT[config.filesystem]
-	segments = [("root", fs_hint, f"{boot_end_mib}MiB", end_arg(root_end_mib))]
+	segments = [("root", fs_hint, f"{first_mib}MiB", end_arg(root_end_mib))]
 	if root_gib or home_gib:
 		home_end_mib = root_end_mib + home_gib * 1024 if home_gib else avail_end_mib
 		segments.append(("home", fs_hint, f"{root_end_mib}MiB", end_arg(home_end_mib)))
 	if swap_gib:
-		segments.append(("swap", "linux-swap", swap_start, "100%"))
+		segments.append(("swap", "linux-swap", f"{avail_end_mib}MiB", end_arg(last_mib)))
+	return segments
 
+
+def _partition_custom(config: Config):
+	boot_roles, boot_args, boot_end_mib = _boot_partition(config.boot_mode == BOOT_UEFI)
+	disk_mib = utils.disk_bytes(config.disk) // 2**20
+	segments = _custom_segments(config, boot_end_mib, disk_mib, disk_mib)
 	parted_args = ["mklabel", "gpt", *boot_args]
 	for role, parted_type, start, end in segments:
 		parted_args += ["mkpart", role, parted_type, start, end]
 	roles = [*boot_roles, *(role for role, *_rest in segments)]
 	_apply_partitions(config, roles, parted_args)
+
+
+def _mkpart_args(label, role, parted_type, start, end):
+	"""mkpart arguments. GPT takes a name, MBR takes a primary type first."""
+	if label == "gpt":
+		return ["mkpart", role, parted_type, start, end]
+	return ["mkpart", "primary", parted_type, start, end]
+
+
+def _wait_for_new_partitions(disk, existing, expected, attempts=10):
+	for _ in range(attempts):
+		_try(["partprobe", disk])
+		new = [part for part in get_partitions(disk) if part not in existing]
+		if len(new) >= expected:
+			return new[:expected]
+		time.sleep(0.5)
+	die(f"Expected {expected} new partitions on {disk}")
+
+
+def _partition_free_space(config: Config):
+	region = utils.largest_free_region(config.disk)
+	if region is None:
+		die("No unallocated space on the disk.")
+	start_mib, end_mib = region
+	disk_mib = utils.disk_bytes(config.disk) // 2**20
+	esp = utils.find_esp(config.disk) if config.boot_mode == BOOT_UEFI else None
+	if config.boot_mode == BOOT_UEFI and not esp:
+		die("No EFI system partition found on the disk.")
+	label = utils.partition_table_type(config.disk)
+	segments = _custom_segments(config, start_mib, end_mib, disk_mib)
+	parted_args = []
+	for role, parted_type, start, end in segments:
+		parted_args += _mkpart_args(label, role, parted_type, start, end)
+	existing = get_partitions(config.disk)
+	_run(["parted", "-s", config.disk, *parted_args], quiet=True)
+	created = _wait_for_new_partitions(config.disk, existing, len(segments))
+	config.layout = {role: {"device": device, "format": True}
+	                 for (role, *_rest), device in zip(segments, created)}
+	if esp:
+		config.layout["esp"] = {"device": esp, "format": False}
 
 
 def _format_layout(config: Config):
@@ -400,10 +441,13 @@ def partition_disk(config: Config):
 		msg("Using selected partitions...")
 	else:
 		msg(f"Partitioning {config.disk}...")
-		if config.custom:
+		if config.free_space:
+			_partition_free_space(config)
+		elif config.custom:
 			_partition_custom(config)
 		else:
 			_partition_auto(config)
+	config.dual_boot = config.free_space or config.shared_esp()
 	if config.luks:
 		_encrypt_layout(config)
 	_format_layout(config)
@@ -797,9 +841,12 @@ def install_bootloader(config: Config):
 		         "--bootloader-id=debian", "--recheck"])
 		if not os.path.isfile(f"{MNT}/boot/efi/EFI/debian/shimx64.efi"):
 			die("Signed shim was not installed to the EFI partition.")
-		_install_removable_fallback()
+		if not config.shared_esp():
+			_install_removable_fallback()
 	else:
 		_chroot(["grub-install", "--target=i386-pc", "--recheck", config.disk])
+	if config.dual_boot:
+		_write_target("/etc/default/grub", "GRUB_DISABLE_OS_PROBER=false\n", append=True)
 	_chroot(["update-grub"])
 	ok("Bootloader installed")
 
