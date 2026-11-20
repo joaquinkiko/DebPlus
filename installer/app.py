@@ -69,11 +69,11 @@ class App:
 		self.config = config
 		self.install_requested = False
 		self.preflight = []
-		self.detect_hardware = True
+		self.autodetect_used = False
 		self.detections = []
-		self.auto = []
+		self.recommended = []
 		self.suggestions = []
-		self.suggest_picked = {}
+		self.picked = {}
 		self._in_main = True
 		self._in_splash = False
 		self._menu_focus = 0
@@ -253,54 +253,56 @@ class App:
 		return rail
 
 	def show_splash(self):
-		"""Logo, detect checkbox and entry options, shown before the install menu."""
+		"""Logo and entry buttons, shown before the install menu."""
 		self._in_main = False
 		self._in_splash = True
 
-		detect = urwid.CheckBox(
-			"  Hardware detect", state=self.detect_hardware,
-			on_state_change=lambda _box, state: setattr(self, "detect_hardware", state))
 		start = Selectable(("bold", "  Start Setup"))
-		urwid.connect_signal(start, "activate", lambda _: self.run_start())
+		urwid.connect_signal(start, "activate", lambda _: self.show_intro(autodetect=False))
+		detect = Selectable(("bold", "  Hardware Detect"))
+		urwid.connect_signal(detect, "activate", lambda _: self.show_intro(autodetect=True))
 		abort = Selectable(("bold", "  Abort"))
 		urwid.connect_signal(abort, "activate", lambda _: self._exit())
 
 		pile = urwid.Pile([
 			urwid.Padding(urwid.Text(("title", LOGO)), align="center", width="pack"),
 			urwid.Divider(),
-			urwid.Padding(detect, align="center", width=24),
 			urwid.Padding(start, align="center", width=24),
+			urwid.Padding(detect, align="center", width=24),
 			urwid.Padding(abort, align="center", width=24),
 		])
-		pile.focus_position = 3  # Start Setup
+		pile.focus_position = 2  # Start Setup
 
 		self.frame.body = urwid.Filler(pile, valign="middle")
 		self.frame.footer = self._make_footer(SPLASH_FOOTER)
 
-	def run_start(self):
-		"""Detect hardware if ticked, apply the automatic picks, then show the intro screen."""
-		self.refresh_preflight()
-		self.detections = hwdetect.detect() if self.detect_hardware else []
-		self.auto, self.suggestions = hwdetect.plan(self.detections)
-		hwdetect.apply(self.config, self.auto)
-		screens.drop_unavailable(self.config)
-		self.suggest_picked = {package: False for package, _label in self.suggestions}
-		self.show_intro()
-
-	def show_intro(self):
-		"""Detection results, suggested options and pre-flight warnings, with Continue."""
+	def show_intro(self, autodetect):
+		"""Intro screen. With autodetect, shows detections and checkboxes; always shows pre-flight warnings."""
 		self._in_splash = True
 		self._in_main = False
+		self.refresh_preflight()
+		self.autodetect_used = autodetect
+		self.detections = hwdetect.detect() if autodetect else []
+		self.recommended, self.suggestions = hwdetect.plan(self.detections)
+		self.picked = ({package: True for package, _label in self.recommended}
+		               | {package: False for package, _label in self.suggestions})
 
 		widgets = [urwid.Text(("title", "\n  Before you start\n")), urwid.Divider()]
-		if self.detect_hardware:
-			widgets += screens.detect_rows(self.detections, self.auto)
-		if self.suggestions:
-			widgets.append(urwid.Text(("title", "  Suggested")))
-			widgets += [urwid.CheckBox(f"  {label}", state=False,
-			                           on_state_change=self._set_suggest, user_data=package)
-			            for package, label in self.suggestions]
-			widgets.append(urwid.Divider())
+		if autodetect:
+			widgets += screens.detect_rows(self.detections)
+			if self.recommended:
+				widgets.append(urwid.Text(("title", "  Recommended")))
+				widgets += [self._pick_box(package, label)
+				            for package, label in self.recommended]
+				widgets.append(urwid.Divider())
+			if self.suggestions:
+				widgets.append(urwid.Text(("title", "  Suggested")))
+				widgets += [self._pick_box(package, label)
+				            for package, label in self.suggestions]
+				widgets.append(urwid.Divider())
+			if not (self.recommended or self.suggestions):
+				widgets.append(urwid.Text(("label", "  Nothing to recommend for this hardware.")))
+				widgets.append(urwid.Divider())
 		widgets += screens.warning_rows(self.preflight)
 
 		continue_button = Selectable(("bold", "  Continue"))
@@ -310,13 +312,18 @@ class App:
 		self.frame.body = urwid.ListBox(urwid.SimpleFocusListWalker(widgets))
 		self.frame.footer = self._make_footer(INTRO_FOOTER)
 
-	def _set_suggest(self, _box, state, package):
-		self.suggest_picked[package] = state
+	def _pick_box(self, package, label):
+		return urwid.CheckBox(f"  {label}", state=self.picked[package],
+		                      on_state_change=self._set_pick, user_data=package)
+
+	def _set_pick(self, _box, state, package):
+		self.picked[package] = state
 
 	def finish_intro(self):
-		"""Apply the suggestions the user ticked, then open the main menu."""
-		picked = [package for package, _label in self.suggestions if self.suggest_picked.get(package)]
-		hwdetect.apply(self.config, picked)
+		"""Apply the ticked packages, which turns on components and multiarch only when needed."""
+		chosen = [package for package, _label in self.recommended + self.suggestions
+		          if self.picked.get(package)]
+		hwdetect.apply(self.config, chosen)
 		screens.drop_unavailable(self.config)
 		self.show_main()
 

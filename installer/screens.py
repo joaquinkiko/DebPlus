@@ -980,19 +980,12 @@ def software(app):
 	_extras_screen(app, "software", "Software")
 
 
-def detect_rows(detections, auto):
-	"""Widgets listing detected hardware and the packages ticked for it."""
-	labels = {package: label for _menu, _section, package, label, _requires in utils.extras_rows()}
+def detect_rows(detections):
+	"""Widgets naming the hardware that was detected."""
 	found = sorted({trigger if identifier == "*" else f"{trigger} {identifier}"
 	                for trigger, identifier in detections})
-	rows = [urwid.Text(("label", f"  Detected: {', '.join(found) or 'nothing'}"))]
-	if auto:
-		rows.append(urwid.Text(("success", "  Ticked in Hardware:")))
-		rows += [urwid.Text(("value", f"    {labels.get(package, package)}"))
-		         for package in auto]
-	else:
-		rows.append(urwid.Text(("label", "  Nothing ticked in Hardware.")))
-	return rows + [urwid.Divider()]
+	return [urwid.Text(("label", f"  Detected: {', '.join(found) or 'nothing'}")),
+	        urwid.Divider()]
 
 
 def warning_rows(checks):

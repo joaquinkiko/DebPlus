@@ -94,22 +94,21 @@ def detect(root="/"):
 
 
 def plan(detections):
-	"""(auto, suggestions): packages to add now, and (package, label) pairs offered as checkboxes."""
+	"""(recommended, suggested): (package, label) pairs from matching rules, one entry per package."""
 	labels = {package: label for _menu, _section, package, label, _requires in utils.extras_rows()}
-	auto = []
-	suggestions = []
+	recommended = []
+	suggested = []
+	seen = set()
 	for row_trigger, row_match, package, mode in utils.autodetect_rows():
 		hit = row_trigger == "always" or any(
 			row_trigger == trigger and row_match.lower() in ("*", identifier)
 			for trigger, identifier in detections)
-		if not hit:
+		if not hit or package in seen:
 			continue
-		if mode == "add":
-			if package not in auto:
-				auto.append(package)
-		elif package not in [entry for entry, _label in suggestions]:
-			suggestions.append((package, labels.get(package, package)))
-	return auto, suggestions
+		seen.add(package)
+		target = recommended if mode == "add" else suggested
+		target.append((package, labels.get(package, package)))
+	return recommended, suggested
 
 
 def apply(config, packages):
