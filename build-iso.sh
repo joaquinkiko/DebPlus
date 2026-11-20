@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build the DebPlus installer ISO. Run as root on a Debian host.
 # Requires: debootstrap, xorriso, mksquashfs (squashfs-tools), mtools, dpkg-dev, debian-archive-keyring
-# grub-pc-bin, grub-efi-amd64-bin.
+# grub-pc-bin, grub-efi-amd64-bin, grub-common.
 
 set -euo pipefail
 
@@ -64,7 +64,7 @@ resolver_config_path() {
 
 preflight() {
 	local -a problems=()
-	local command_name variable_name relative_path directory free_kilobytes
+	local command_name variable_name relative_path directory free_kilobytes squashfs_help
 
 	[[ $EUID -eq 0 ]] || die "Must be run as root"
 
@@ -74,6 +74,7 @@ preflight() {
 		[xorriso]=xorriso
 		[mksquashfs]=squashfs-tools
 		[grub-mkimage]=grub-common
+		[grub-script-check]=grub-common
 		[mkfs.fat]=dosfstools
 		[mmd]=mtools
 		[mcopy]=mtools
@@ -90,9 +91,16 @@ preflight() {
 	done
 
 	[ -f "$KEYRING" ] || problems+=("missing $KEYRING (apt install debian-archive-keyring)")
+	[ -f "/usr/share/debootstrap/scripts/$SUITE" ] ||
+		problems+=("debootstrap has no '$SUITE' script (install a newer debootstrap)")
 	[ -d /usr/lib/grub/i386-pc ] || problems+=("missing GRUB BIOS modules (apt install grub-pc-bin)")
 	[ -d /usr/lib/grub/x86_64-efi ] || problems+=("missing GRUB UEFI modules (apt install grub-efi-amd64-bin)")
 	[ -f /usr/lib/grub/i386-pc/boot_hybrid.img ] || problems+=("missing boot_hybrid.img (apt install grub-pc-bin)")
+
+	# mksquashfs prints its compressor list on usage, so capture it before grepping
+	squashfs_help="$(mksquashfs 2>&1 || true)"
+	grep -q zstd <<< "$squashfs_help" ||
+		problems+=("mksquashfs lacks zstd support (squashfs-tools too old or built without it)")
 
 	for variable_name in PROFILE_SLUG SUITE MIRROR ISO_LABEL; do
 		[ -n "${!variable_name:-}" ] || problems+=("profile.env does not set $variable_name")
@@ -170,7 +178,7 @@ run_setup_in_chroot() {
 	cat > "$root_dir/tmp/setup.sh"
 	chmod +x "$root_dir/tmp/setup.sh"
 	rm -f "$root_dir/etc/resolv.conf"
-	cp /etc/resolv.conf "$root_dir/etc/resolv.conf"	cp -L "$(resolver_config_path)" "$root_dir/etc/resolv.conf"
+	cp -L "$(resolver_config_path)" "$root_dir/etc/resolv.conf"
 	chroot "$root_dir" /tmp/setup.sh
 	: > "$root_dir/etc/resolv.conf"
 	rm -f "$root_dir/tmp/setup.sh"
@@ -428,9 +436,23 @@ validate_iso() {
 	msg "ISO validated"
 }
 
+# ── Host report ────────────────────────────────────────────────────────
+
+host_report() {
+	local os_id os_name
+	os_id="$(. /etc/os-release && echo "${ID:-unknown}")"
+	os_name="$(. /etc/os-release && echo "${PRETTY_NAME:-unknown}")"
+	msg "Host: $os_name"
+	[ "$os_id" = debian ] || msg "Host is not Debian. Trixie hosts are the tested configuration."
+	msg "Tool versions:"
+	dpkg-query -W -f='  ${Package} ${Version}\n' \
+		debootstrap xorriso squashfs-tools grub-common 2>/dev/null || true
+}
+
 # ── Main ───────────────────────────────────────────────────────────────
 
 main() {
+	host_report
 	preflight
 	assert_no_active_mounts
 	rm -rf "$WORK_DIR"
