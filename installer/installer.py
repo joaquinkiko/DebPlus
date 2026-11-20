@@ -16,7 +16,7 @@ import time
 
 from . import utils
 from .config import Config
-from .utils import (MNT, MIRROR, PROFILE, BIOS_BOOT_END_MIB, ESP_END_MIB,
+from .utils import (MNT, PROFILE, BIOS_BOOT_END_MIB, ESP_END_MIB,
                     get_partitions, keyboard_config)
 
 BOLD = "\033[1m"
@@ -517,11 +517,11 @@ def _write_backports_pins(config: Config):
 def write_apt_sources(config: Config):
 	components = " ".join(["main"] + config.components)
 	stanzas = [
-		_apt_stanza(MIRROR, f"{SUITE} {SUITE}-updates", components),
+		_apt_stanza(config.mirror, f"{SUITE} {SUITE}-updates", components),
 		_apt_stanza(SECURITY_MIRROR, f"{SUITE}-security", components),
 	]
 	if config.backports_repo or config.backports_kernel or config.backports_mesa:
-		stanzas.append(_apt_stanza(MIRROR, BACKPORTS, components))
+		stanzas.append(_apt_stanza(config.mirror, BACKPORTS, components))
 		_write_backports_pins(config)
 	_write_target("/etc/apt/sources.list.d/debian.sources", "\n".join(stanzas))
 	_write_target("/etc/apt/sources.list", "")

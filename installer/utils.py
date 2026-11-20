@@ -22,6 +22,7 @@ WM_DIR = os.path.join(OPTIONS_DIR, "wm")
 CUSTOM_DIR = os.path.join(OPTIONS_DIR, "custom")
 WMS_PATH = os.path.join(OPTIONS_DIR, "wms.list")
 EXTRAS_PATH = os.path.join(OPTIONS_DIR, "extras.list")
+MIRRORS_PATH = os.path.join(OPTIONS_DIR, "mirrors.list")
 COMPONENTS_PATH = os.path.join(OPTIONS_DIR, "components.list")
 CUSTOM_PATH = os.path.join(OPTIONS_DIR, "custom.list")
 OPTIONAL_PATH = os.path.join(PACKAGES_DIR, "optional.list")
@@ -498,6 +499,11 @@ def wm_rows():
 def extras_rows():
 	"""(menu, section, package, label, requires) per optional package."""
 	return [row[:5] for row in _rows(EXTRAS_PATH)]
+
+
+def mirror_rows():
+	"""(label, url) per Debian mirror, default first."""
+	return _rows(MIRRORS_PATH)
 
 
 @functools.lru_cache(maxsize=None)

@@ -1012,6 +1012,38 @@ def secure_boot(app):
 	_form_screen(app, "Secure Boot", _with_back(app, items), [passphrase, confirm], accept)
 
 
+def _custom_mirror(app):
+	edit = SubmitEdit("  URL: ", app.config.mirror)
+	error_text = urwid.Text("")
+
+	def accept(_=None):
+		url = edit.edit_text.strip()
+		if re.match(r"^https?://\S+$", url):
+			_set(app, "mirror", url)
+		else:
+			_show_error(error_text, "Use an http:// or https:// URL")
+
+	items = [
+		urwid.Text(("label", "  Full apt base URL, e.g. http://ftp.example.org/debian/")),
+		urwid.Divider(),
+		edit,
+		error_text,
+		urwid.Divider(),
+		_action(("bold", "  Accept"), accept),
+	]
+	_form_screen(app, "Custom Mirror", _with_back(app, items), [edit], accept)
+
+
+def mirror(app):
+	items = [
+		_action(f"  {label:<16}{url}", lambda _, v=url: _set(app, "mirror", v))
+		for label, url in utils.mirror_rows()
+	]
+	items.append(_action(("bold", "  Custom..."), lambda _: _custom_mirror(app)))
+	_open(app, "Debian Mirror", _with_back(app, items),
+	      footer_text="  ↑↓ navigate  Enter select  Esc back")
+
+
 # ── Advanced ───────────────────────────────────────────────────────────
 
 def _on_backports_repo(_box, state, app):
@@ -1050,6 +1082,10 @@ def advanced(app):
 	elif app.online:
 		items += [urwid.Text(("unset", "  Backports kernel and Mesa require the backports repository.")),
 		          urwid.Divider()]
+	if app.online:
+		items += _described(
+			_action(f"  Debian mirror  {config.mirror}", lambda _: mirror(app)),
+			"Package source for the installed system. Used for online installs only.")
 	swappiness_edit = urwid.Edit("  Swappiness (0-100): ", str(config.swappiness))
 	urwid.connect_signal(swappiness_edit, "change", _on_swappiness, app)
 	items += [
@@ -1085,6 +1121,7 @@ def summary(app):
 		("Snapshots",      "snapper" if config.snapper else "no"),
 		("Auto updates",   "yes" if config.auto_updates else "no"),
 		("Desktop",        config.desktop_label()),
+		("Mirror",         config.mirror),
 		("Components",     ", ".join(config.components) or "main only"),
 		("Hardware",       ", ".join(config.hardware_packages) or "none"),
 		("Software",       ", ".join(config.software_packages) or "none"),

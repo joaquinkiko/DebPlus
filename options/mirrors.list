@@ -1,0 +1,37 @@
+# label|url. First row is the default and must match MIRROR in profile.env.
+Default|https://deb.debian.org/debian
+Australia|http://ftp.au.debian.org/debian/
+Austria|http://ftp.at.debian.org/debian/
+Belarus|http://ftp.by.debian.org/debian/
+Belgium|http://ftp.be.debian.org/debian/
+Brazil|http://ftp.br.debian.org/debian/
+Bulgaria|http://ftp.bg.debian.org/debian/
+Canada|http://ftp.ca.debian.org/debian/
+Chile|http://ftp.cl.debian.org/debian/
+China|http://ftp.cn.debian.org/debian/
+Croatia|http://ftp.hr.debian.org/debian/
+Czech Republic|http://ftp.cz.debian.org/debian/
+Denmark|http://ftp.dk.debian.org/debian/
+Finland|http://ftp.fi.debian.org/debian/
+France|http://ftp.fr.debian.org/debian/
+Germany|http://ftp2.de.debian.org/debian/
+Germany|http://ftp.de.debian.org/debian/
+Hong Kong|http://ftp.hk.debian.org/debian/
+Iceland|http://ftp.is.debian.org/debian/
+Italy|http://ftp.it.debian.org/debian/
+Korea|http://ftp.kr.debian.org/debian/
+Lithuania|http://ftp.lt.debian.org/debian/
+Netherlands|http://ftp.nl.debian.org/debian/
+New Caledonia|http://ftp.nc.debian.org/debian/
+New Zealand|http://ftp.nz.debian.org/debian/
+Norway|http://ftp.no.debian.org/debian/
+Poland|http://ftp.pl.debian.org/debian/
+Portugal|http://ftp.pt.debian.org/debian/
+Russia|http://ftp.ru.debian.org/debian/
+Slovakia|http://ftp.sk.debian.org/debian/
+Sweden|http://ftp.se.debian.org/debian/
+Switzerland|http://ftp.ch.debian.org/debian/
+Taiwan|http://ftp.tw.debian.org/debian/
+Turkey|http://ftp.tr.debian.org/debian/
+United Kingdom|http://ftp.uk.debian.org/debian/
+United States|http://ftp.us.debian.org/debian/

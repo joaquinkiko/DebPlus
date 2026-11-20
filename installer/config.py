@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from .utils import ESP_RESERVE_GIB, MIN_DISK_GIB, MIN_HOME_GIB, boot_reserve_mib, dkms_packages
+from .utils import ESP_RESERVE_GIB, MIN_DISK_GIB, MIN_HOME_GIB, MIRROR, boot_reserve_mib, dkms_packages
 
 # Fields that must be set before Install unlocks. Everything else is optional.
 REQUIRED_FIELDS = (
@@ -35,6 +35,7 @@ class Config:
 	luks_pass: str = field(default="", repr=False)
 	snapper: bool = False  # btrfs only
 	auto_updates: bool = True  # daily security upgrades via unattended-upgrades
+	mirror: str = MIRROR  # apt base URL, default from profile.env
 	manual: bool = False
 	free_space: bool = False  # install into unallocated space, keeping existing partitions
 	dual_boot: bool = False  # other systems may be present. Set during partitioning
@@ -58,6 +59,7 @@ class Config:
 		if self.desktop not in ("", "console"):
 			self.desktop = ""
 		self.custom_repo = ""
+		self.mirror = MIRROR
 		self.backports_repo = self.backports_kernel = self.backports_mesa = False
 
 	def selected_packages(self) -> list:
@@ -142,6 +144,7 @@ class Config:
 			(self.backports_mesa, "backports mesa"),
 			(self.swappiness != 60, f"swappiness {self.swappiness}"),
 			(not self.zram, "no zram"),
+			(self.mirror != MIRROR, "custom mirror"),
 		)
 		return [label for enabled, label in conditions if enabled]
 
