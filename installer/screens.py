@@ -980,6 +980,22 @@ def software(app):
 	_extras_screen(app, "software", "Software")
 
 
+def hardware_detect(app, detections, matched):
+	labels = {package: label for _menu, _section, package, label, _requires in utils.extras_rows()}
+	found = sorted({trigger if identifier == "*" else f"{trigger} {identifier}"
+	                for trigger, identifier in detections})
+	items = [urwid.Text(("label", f"  Detected: {', '.join(found) or 'nothing'}")),
+	         urwid.Divider()]
+	if matched:
+		items.append(urwid.Text(("success", "  Ticked in Hardware:")))
+		items += [urwid.Text(("value", f"    {labels.get(package, package)}"))
+		          for package in matched]
+	else:
+		items.append(urwid.Text(("label", "  No matching hardware found.")))
+	items += [urwid.Divider(), urwid.Text(("label", "  Adjust anything under Hardware."))]
+	_open(app, "Hardware Detect", _with_back(app, items))
+
+
 # ── Secure Boot ────────────────────────────────────────────────────────
 
 def secure_boot(app):

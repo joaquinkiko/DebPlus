@@ -7,7 +7,7 @@ import os
 
 import urwid
 
-from . import screens, utils
+from . import hwdetect, screens, utils
 from .config import Config
 from .widgets import Selectable
 
@@ -250,6 +250,8 @@ class App:
 
 		start = Selectable(("bold", "  Start Setup"))
 		urwid.connect_signal(start, "activate", lambda _: self.show_main())
+		detect = Selectable(("bold", "  Hardware Detect"))
+		urwid.connect_signal(detect, "activate", lambda _: self.run_hardware_detect())
 		abort = Selectable(("bold", "  Abort"))
 		urwid.connect_signal(abort, "activate", lambda _: self._exit())
 
@@ -257,12 +259,21 @@ class App:
 			urwid.Padding(urwid.Text(("title", LOGO)), align="center", width="pack"),
 			urwid.Divider(),
 			start,
+			detect,
 			abort,
 		])
 		pile.focus_position = 2  # Start Setup
 
 		self.frame.body = urwid.Filler(pile, valign="middle")
 		self.frame.footer = self._make_footer(SPLASH_FOOTER)
+
+	def run_hardware_detect(self):
+		"""Match detected hardware to autodetect.list, tick extras, then show the results."""
+		self._in_splash = False
+		detections = hwdetect.detect()
+		matched = hwdetect.apply(self.config, detections)
+		screens.drop_unavailable(self.config)
+		screens.hardware_detect(self, detections, matched)
 
 	def show_main(self):
 		"""Rail focused, install plan in the right pane."""

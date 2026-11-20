@@ -9,6 +9,9 @@ from .config import Config
 def main():
 	if os.geteuid() != 0:
 		sys.exit("Must be run as root")
+	problems = utils.autodetect_problems()
+	if problems:
+		sys.exit("\n".join(problems))
 	fake_mode = "--test" in sys.argv[1:]
 	missing = utils.missing_tools()
 	if missing and not fake_mode:

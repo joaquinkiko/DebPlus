@@ -1,0 +1,20 @@
+# trigger|match|package. Matches a detected device to an extras.list row. Used by Hardware Detect.
+# match is a lowercase vendor id (PCI or USB), a CPU vendor_id, or * for any. package must equal the extras.list package field exactly.
+# hybrid means a laptop with more than one GPU vendor.
+cpu|genuineintel|intel-microcode
+cpu|authenticamd|amd64-microcode
+gpu|8086|firmware-intel-graphics intel-media-va-driver
+gpu|1002|firmware-amd-graphics mesa-va-drivers
+gpu|10de|firmware-nvidia-graphics nvidia-detect nvidia-driver nvidia-kernel-dkms
+wifi|8086|firmware-iwlwifi
+wifi|10ec|firmware-realtek
+wifi|0bda|firmware-realtek
+wifi|168c|firmware-atheros
+wifi|0cf3|firmware-atheros
+wifi|14e4|firmware-brcm80211
+wifi|14c3|firmware-mediatek
+wifi|0e8d|firmware-mediatek
+bluetooth|*|bluez
+audio|8086|firmware-sof-signed
+hybrid|*|switcheroo-control
+sensors|*|lm-sensors

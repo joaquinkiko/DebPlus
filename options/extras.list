@@ -27,7 +27,11 @@ hardware|Scanning|sane-utils|Scanner support|-|bake
 
 hardware|Sensors|lm-sensors|Hardware sensors|-|bake
 
-hardware|Wi-Fi|firmware-iwlwifi firmware-realtek firmware-atheros firmware-brcm80211 firmware-mediatek|Wi-Fi firmware|non-free-firmware|bake
+hardware|Wi-Fi|firmware-iwlwifi|Intel Wi-Fi firmware|non-free-firmware|bake
+hardware|Wi-Fi|firmware-realtek|Realtek Wi-Fi firmware|non-free-firmware|bake
+hardware|Wi-Fi|firmware-atheros|Atheros Wi-Fi firmware|non-free-firmware|bake
+hardware|Wi-Fi|firmware-brcm80211|Broadcom Wi-Fi firmware|non-free-firmware|bake
+hardware|Wi-Fi|firmware-mediatek|MediaTek Wi-Fi firmware|non-free-firmware|bake
 
 hardware|Firmware|firmware-misc-nonfree|Misc hardware firmware|non-free-firmware|bake
 hardware|Firmware|fwupd|Firmware updates (LVFS)|-|bake

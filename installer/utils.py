@@ -22,6 +22,7 @@ WM_DIR = os.path.join(OPTIONS_DIR, "wm")
 CUSTOM_DIR = os.path.join(OPTIONS_DIR, "custom")
 WMS_PATH = os.path.join(OPTIONS_DIR, "wms.list")
 EXTRAS_PATH = os.path.join(OPTIONS_DIR, "extras.list")
+AUTODETECT_PATH = os.path.join(OPTIONS_DIR, "autodetect.list")
 MIRRORS_PATH = os.path.join(OPTIONS_DIR, "mirrors.list")
 FIREWALL_PATH = os.path.join(OPTIONS_DIR, "firewall.list")
 COMPONENTS_PATH = os.path.join(OPTIONS_DIR, "components.list")
@@ -500,6 +501,18 @@ def wm_rows():
 def extras_rows():
 	"""(menu, section, package, label, requires) per optional package."""
 	return [row[:5] for row in _rows(EXTRAS_PATH)]
+
+
+def autodetect_rows():
+	"""(trigger, match, package) per detection rule. match is a vendor id, '*', or blank."""
+	return _rows(AUTODETECT_PATH)
+
+
+def autodetect_problems():
+	"""Messages for autodetect rows whose package is not an extras.list row."""
+	extras_packages = {package for _menu, _section, package, _label, _requires in extras_rows()}
+	return [f"autodetect.list: no extras.list row for '{package}'"
+	        for _trigger, _match, package in autodetect_rows() if package not in extras_packages]
 
 
 def mirror_rows():
