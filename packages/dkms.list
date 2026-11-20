@@ -1,2 +1,4 @@
 # DKMS packages. Under Secure Boot their modules are signed with the MOK key. One package per line.
 nvidia-kernel-dkms
+nvidia-open-kernel-dkms
+broadcom-sta-dkms

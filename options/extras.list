@@ -8,17 +8,23 @@ hardware|Graphics|mesa-vulkan-drivers libgl1-mesa-dri|Mesa (Vulkan and OpenGL)|-
 hardware|Graphics|libgl1-mesa-dri:i386 libglx-mesa0:i386 libegl-mesa0:i386 mesa-vulkan-drivers:i386|Mesa 32-bit libraries (Gaming)|i386
 hardware|Graphics|firmware-amd-graphics mesa-va-drivers|AMD GPU firmware and drivers|non-free-firmware|bake
 hardware|Graphics|firmware-intel-graphics intel-media-va-driver|Intel GPU firmware and drivers|non-free-firmware|bake
-hardware|Graphics|firmware-nvidia-graphics nvidia-detect nvidia-driver nvidia-kernel-dkms|NVIDIA driver|contrib,non-free-firmware,non-free|bake
+hardware|Graphics|firmware-nvidia-graphics nvidia-detect nvidia-driver nvidia-open-kernel-dkms|NVIDIA driver (Turing and newer, open module)|contrib,non-free-firmware,non-free|bake
+hardware|Graphics|firmware-nvidia-graphics nvidia-detect nvidia-driver nvidia-kernel-dkms|NVIDIA driver (Maxwell to Volta, proprietary module)|contrib,non-free-firmware,non-free|bake
 hardware|Graphics|nvidia-driver-libs:i386|NVIDIA 32-bit libraries (Gaming)|nvidia-driver,i386
 hardware|Graphics|nvidia-settings|NVIDIA settings panel|contrib,nvidia-driver|bake
 hardware|Graphics|switcheroo-control|Hybrid graphics switching (laptops)|-|bake
 
 hardware|CPU|intel-microcode|Intel CPU microcode|non-free-firmware|bake
 hardware|CPU|amd64-microcode|AMD CPU microcode|non-free-firmware|bake
+hardware|CPU|thermald|Intel thermal daemon|-
 
 hardware|Audio|firmware-sof-signed|Intel audio firmware (SOF)|non-free-firmware|bake
 
 hardware|Bluetooth|bluez|Bluetooth|-|bake
+
+hardware|Biometrics|fprintd libpam-fprintd|Fingerprint reader (fprintd)|-
+
+hardware|Thunderbolt|bolt|Thunderbolt device authorization (bolt)|-
 
 hardware|Printing|cups cups-filters cups-browsed avahi-daemon|Printing service (CUPS)|-|bake
 hardware|Printing|printer-driver-gutenprint hplip printer-driver-escpr printer-driver-brlaser printer-driver-splix|Printer drivers|cups|bake
@@ -27,11 +33,18 @@ hardware|Scanning|sane-utils|Scanner support|-|bake
 
 hardware|Sensors|lm-sensors|Hardware sensors|-|bake
 
+hardware|Power|power-profiles-daemon|Power profiles|-
+
+hardware|Security|pcscd libccid|Smart card support (pcscd)|-
+
+hardware|Virtual machine|qemu-guest-agent spice-vdagent|VM guest tools|-
+
 hardware|Wi-Fi|firmware-iwlwifi|Intel Wi-Fi firmware|non-free-firmware|bake
 hardware|Wi-Fi|firmware-realtek|Realtek Wi-Fi firmware|non-free-firmware|bake
 hardware|Wi-Fi|firmware-atheros|Atheros Wi-Fi firmware|non-free-firmware|bake
 hardware|Wi-Fi|firmware-brcm80211|Broadcom Wi-Fi firmware|non-free-firmware|bake
 hardware|Wi-Fi|firmware-mediatek|MediaTek Wi-Fi firmware|non-free-firmware|bake
+hardware|Wi-Fi|broadcom-sta-dkms|Broadcom legacy Wi-Fi (wl, DKMS)|non-free
 
 hardware|Firmware|firmware-misc-nonfree|Misc hardware firmware|non-free-firmware|bake
 hardware|Firmware|fwupd|Firmware updates (LVFS)|-|bake

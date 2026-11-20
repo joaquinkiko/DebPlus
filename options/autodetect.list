@@ -1,27 +1,41 @@
 # trigger|match|package|mode. Matches detected hardware to an extras.list row. Used by Hardware Detect.
-# trigger: cpu, gpu, wifi, bluetooth, audio, hybrid, sensors, or always (matches every install).
+# trigger: cpu, gpu, nvidia-open, nvidia-legacy, wifi, broadcom-legacy, bluetooth, audio, usb, smartcard,
+#          thunderbolt, laptop, vm, hybrid, sensors, or always (matches every install).
 # match: lowercase vendor id (PCI or USB), CPU vendor_id, or * for any. Ignored for always.
 # mode: add ticks the package in Hardware. suggest shows a checkbox on the intro screen, unticked.
 # package must equal the extras.list package field exactly. A package that needs another must be suggested too.
+# On a VM, hardware triggers (gpu, nvidia-*, wifi, broadcom-legacy, bluetooth, audio, usb, thunderbolt) are skipped.
 cpu|genuineintel|intel-microcode|add
 cpu|authenticamd|amd64-microcode|add
+cpu|genuineintel|thermald|suggest
 gpu|8086|firmware-intel-graphics intel-media-va-driver|add
 gpu|8086|mesa-vulkan-drivers libgl1-mesa-dri|suggest
 gpu|1002|firmware-amd-graphics mesa-va-drivers|add
 gpu|1002|mesa-vulkan-drivers libgl1-mesa-dri|suggest
-gpu|10de|firmware-nvidia-graphics nvidia-detect nvidia-driver nvidia-kernel-dkms|add
+nvidia-open|*|firmware-nvidia-graphics nvidia-detect nvidia-driver nvidia-open-kernel-dkms|add
+nvidia-legacy|*|firmware-nvidia-graphics nvidia-detect nvidia-driver nvidia-kernel-dkms|add
 gpu|10de|nvidia-driver-libs:i386|suggest
 wifi|8086|firmware-iwlwifi|add
 wifi|10ec|firmware-realtek|add
 wifi|0bda|firmware-realtek|add
 wifi|168c|firmware-atheros|add
 wifi|0cf3|firmware-atheros|add
+wifi|17cb|firmware-atheros|add
 wifi|14e4|firmware-brcm80211|add
 wifi|14c3|firmware-mediatek|add
 wifi|0e8d|firmware-mediatek|add
+broadcom-legacy|*|broadcom-sta-dkms|add
 bluetooth|*|bluez|add
 audio|8086|firmware-sof-signed|add
+usb|06cb|fprintd libpam-fprintd|suggest
+usb|27c6|fprintd libpam-fprintd|suggest
+usb|138a|fprintd libpam-fprintd|suggest
+usb|04f3|fprintd libpam-fprintd|suggest
+smartcard|*|pcscd libccid|add
+thunderbolt|*|bolt|add
 hybrid|*|switcheroo-control|add
+laptop|*|power-profiles-daemon|add
+vm|*|qemu-guest-agent spice-vdagent|add
 sensors|*|lm-sensors|add
 always|*|firmware-misc-nonfree|add
 always|*|cups cups-filters cups-browsed avahi-daemon|suggest
