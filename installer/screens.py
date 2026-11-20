@@ -930,12 +930,15 @@ def _on_archive_toggle(box, state, user_data):
 		drop_unavailable(user_data[0].config)
 
 
-def _on_package_toggle(box, state, user_data):
-	_on_toggle(box, state, user_data)
-	drop_unavailable(user_data[0].config)
+def _on_package_toggle(_box, state, user_data):
+	app, attribute, package, refresh = user_data
+	_on_toggle(None, state, (app, attribute, package))
+	drop_unavailable(app.config)
+	refresh()
 
 
-def _package_row(app, menu, package, label, requirement):
+def _package_row(app, menu, package, label, requirement, refresh):
+	"""One row per package: a checkbox while its requirement is met, otherwise a note of what it needs."""
 	chosen = getattr(app.config, f"{menu}_packages")
 	if not app.online and utils.needs_network(package):
 		return urwid.Text(("unset", f"  {label}  needs internet"))
@@ -943,12 +946,30 @@ def _package_row(app, menu, package, label, requirement):
 		return urwid.CheckBox(
 			f"  {label}", state=package in chosen,
 			on_state_change=_on_package_toggle,
-			user_data=(app, f"{menu}_packages", package))
+			user_data=(app, f"{menu}_packages", package, refresh))
 	return urwid.Text(("unset", f"  {label}  requires {requirement}"))
 
 
-def _extras_screen(app, menu, title):
-	app.refresh_online()
+def replace_rows(listbox, widgets):
+	"""Swap a ListBox's rows in place, keeping the cursor on the same row index."""
+	focus = listbox.focus_position if listbox.body else 0
+	listbox.body[:] = widgets
+	listbox.focus_position = min(focus, len(widgets) - 1)
+
+
+def _live_screen(app, title, build, footer_text=None):
+	"""Screen whose rows come from build(refresh). refresh() rebuilds them in place."""
+	listbox = urwid.ListBox(urwid.SimpleFocusListWalker([]))
+
+	def refresh():
+		header = [urwid.Text(("title", f"\n  {title}\n")), urwid.Divider()]
+		replace_rows(listbox, header + build(refresh))
+
+	refresh()
+	app.show_screen(listbox, footer_text)
+
+
+def _extras_items(app, menu, refresh):
 	entries = [(section, package, label, requirement)
 	           for row_menu, section, package, label, requirement in utils.extras_rows()
 	           if row_menu == menu]
@@ -961,15 +982,20 @@ def _extras_screen(app, menu, title):
 	items = []
 	for section, section_entries in sections.items():
 		items += [urwid.Divider(), urwid.Text(("title", f"  {section}"))]
-		for package, label, requirement in section_entries:
-			items.append(_package_row(app, menu, package, label, requirement))
+		items += [_package_row(app, menu, package, label, requirement, refresh)
+		          for package, label, requirement in section_entries]
 	items += [
 		urwid.Divider(),
 		urwid.Text(("label", "  Optional. Installed after the desktop." if app.online
 		            else "  Offline: only packages bundled on this ISO can be installed.")),
 	]
-	_open(app, title, _with_back(app, items),
-	      footer_text="  ↑↓ navigate  Space toggle  Esc back")
+	return _with_back(app, items)
+
+
+def _extras_screen(app, menu, title):
+	app.refresh_online()
+	_live_screen(app, title, lambda refresh: _extras_items(app, menu, refresh),
+	             "  ↑↓ navigate  Space toggle  Esc back")
 
 
 def hardware(app):

@@ -64,6 +64,11 @@ def _rail_item(glyph, glyph_style, label, label_style):
 	return Selectable([(glyph_style, f" {glyph} "), (label_style, label)])
 
 
+def _requirement_met(requirement, have):
+	"""True when every word in a comma-separated requirement is in have. '-' means none."""
+	return {name for name in requirement.split(",") if name != "-"} <= have
+
+
 class App:
 	def __init__(self, config: Config):
 		self.config = config
@@ -74,6 +79,7 @@ class App:
 		self.recommended = []
 		self.suggestions = []
 		self.picked = {}
+		self._intro_list = None
 		self._in_main = True
 		self._in_splash = False
 		self._menu_focus = 0
@@ -283,41 +289,76 @@ class App:
 		self.refresh_preflight()
 		self.autodetect_used = autodetect
 		self.detections = hwdetect.detect() if autodetect else []
-		self.recommended, self.suggestions = hwdetect.plan(self.detections)
+		self.recommended, self.suggestions = hwdetect.plan(self.detections) if autodetect else ([], [])
 		self.picked = ({package: True for package, _label in self.recommended}
 		               | {package: False for package, _label in self.suggestions})
 
-		widgets = [urwid.Text(("title", "\n  Before you start\n")), urwid.Divider()]
-		if autodetect:
-			widgets += screens.detect_rows(self.detections)
-			if self.recommended:
-				widgets.append(urwid.Text(("title", "  Recommended")))
-				widgets += [self._pick_box(package, label)
-				            for package, label in self.recommended]
-				widgets.append(urwid.Divider())
-			if self.suggestions:
-				widgets.append(urwid.Text(("title", "  Suggested")))
-				widgets += [self._pick_box(package, label)
-				            for package, label in self.suggestions]
-				widgets.append(urwid.Divider())
+		self._intro_list = urwid.ListBox(urwid.SimpleFocusListWalker([]))
+		self._refresh_intro()
+		self.frame.body = self._intro_list
+		self.frame.footer = self._make_footer(INTRO_FOOTER)
+
+	def _intro_have(self):
+		"""Words available on the intro: picked packages, plus components and multiarch, which apply turns on as needed."""
+		have = {component_id for component_id, _label, _description in utils.components_rows()}
+		have.add("i386")
+		for package, _label in self.recommended + self.suggestions:
+			if self.picked.get(package):
+				have.update(package.split())
+		return have
+
+	def _settle_picks(self):
+		"""Untick any pick whose requirement is no longer met, repeating until nothing changes."""
+		requirements = utils.package_requirements()
+		changed = True
+		while changed:
+			changed = False
+			have = self._intro_have()
+			for package, _label in self.recommended + self.suggestions:
+				if self.picked.get(package) and not _requirement_met(requirements.get(package, "-"), have):
+					self.picked[package] = False
+					changed = True
+					break
+
+	def _intro_group(self, heading, entries, requirements, have):
+		"""Checkbox for each entry whose requirement is met, otherwise a note of what it needs."""
+		if not entries:
+			return []
+		rows = [urwid.Text(("title", f"  {heading}"))]
+		for package, label in entries:
+			requirement = requirements.get(package, "-")
+			if _requirement_met(requirement, have):
+				rows.append(urwid.CheckBox(f"  {label}", state=self.picked.get(package, False),
+				                           on_state_change=self._set_pick, user_data=package))
+			else:
+				rows.append(urwid.Text(("unset", f"  {label}  requires {requirement}")))
+		return rows + [urwid.Divider()]
+
+	def _intro_items(self):
+		requirements = utils.package_requirements()
+		have = self._intro_have()
+		items = [urwid.Text(("title", "\n  Before you start\n")), urwid.Divider()]
+		if self.autodetect_used:
+			items += screens.detect_rows(self.detections)
+			items += self._intro_group("Recommended", self.recommended, requirements, have)
+			items += self._intro_group("Suggested", self.suggestions, requirements, have)
 			if not (self.recommended or self.suggestions):
-				widgets.append(urwid.Text(("label", "  Nothing to recommend for this hardware.")))
-				widgets.append(urwid.Divider())
-		widgets += screens.warning_rows(self.preflight)
+				items += [urwid.Text(("label", "  Nothing to recommend for this hardware.")),
+				          urwid.Divider()]
+		items += screens.warning_rows(self.preflight)
 
 		continue_button = Selectable(("bold", "  Continue"))
 		urwid.connect_signal(continue_button, "activate", lambda _: self.finish_intro())
-		widgets += [urwid.Divider(), continue_button]
+		items += [urwid.Divider(), continue_button]
+		return items
 
-		self.frame.body = urwid.ListBox(urwid.SimpleFocusListWalker(widgets))
-		self.frame.footer = self._make_footer(INTRO_FOOTER)
-
-	def _pick_box(self, package, label):
-		return urwid.CheckBox(f"  {label}", state=self.picked[package],
-		                      on_state_change=self._set_pick, user_data=package)
+	def _refresh_intro(self):
+		self._settle_picks()
+		screens.replace_rows(self._intro_list, self._intro_items())
 
 	def _set_pick(self, _box, state, package):
 		self.picked[package] = state
+		self._refresh_intro()
 
 	def finish_intro(self):
 		"""Apply the ticked packages, which turns on components and multiarch only when needed."""
