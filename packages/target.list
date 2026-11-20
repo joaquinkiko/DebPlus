@@ -19,3 +19,4 @@ btrfs-progs
 xfsprogs
 e2fsprogs
 dosfstools
+ufw

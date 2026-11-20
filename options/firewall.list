@@ -1,0 +1,22 @@
+# id|label|ufw rule|on. Each ticked rule runs "ufw <rule>" in the installed system.
+# Add |on to a row to have it ticked by default. Rows without it start unticked.
+
+# Remote Access
+ssh|SSH|allow 22/tcp|on
+
+# Web traffic
+http|Web server|allow 80/tcp
+https|Web server (TLS)|allow 443/tcp
+
+# Device discovery
+mdns|Multicast DNS (Avahi, device discovery)|allow 5353/udp|on
+ssdp|SSDP (UPnP discovery)|allow 1900/udp|on
+cups|CUPS printing (IPP, printer browsing)|allow 631
+
+# File transfer
+localsend|LocalSend|allow 53317|on
+kdeconnect|KDE Connect|allow 1714:1764
+
+# Gaming
+steam-remote|Steam Remote Play|allow 27031:27036/udp
+steam-transfer|Steam local transfers|allow 27036:27037/tcp

@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
-from .utils import ESP_RESERVE_GIB, MIN_DISK_GIB, MIN_HOME_GIB, MIRROR, boot_reserve_mib, dkms_packages
+from .utils import (ESP_RESERVE_GIB, MIN_DISK_GIB, MIN_HOME_GIB, MIRROR, boot_reserve_mib,
+                    dkms_packages, firewall_default_ids)
 
 # Fields that must be set before Install unlocks. Everything else is optional.
 REQUIRED_FIELDS = (
@@ -36,6 +37,10 @@ class Config:
 	snapper: bool = False  # btrfs only
 	auto_updates: bool = True  # daily security upgrades via unattended-upgrades
 	mirror: str = MIRROR  # apt base URL, default from profile.env
+	ufw: bool = False  # enable UFW with the rules from firewall.list
+	ufw_incoming: str = "deny"
+	ufw_outgoing: str = "allow"
+	firewall_rules: list = field(default_factory=firewall_default_ids)  # ids from firewall.list
 	manual: bool = False
 	free_space: bool = False  # install into unallocated space, keeping existing partitions
 	dual_boot: bool = False  # other systems may be present. Set during partitioning
@@ -145,6 +150,7 @@ class Config:
 			(self.swappiness != 60, f"swappiness {self.swappiness}"),
 			(not self.zram, "no zram"),
 			(self.mirror != MIRROR, "custom mirror"),
+			(self.ufw, "ufw"),
 		)
 		return [label for enabled, label in conditions if enabled]
 

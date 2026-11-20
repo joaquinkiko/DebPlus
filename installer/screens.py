@@ -1044,6 +1044,34 @@ def mirror(app):
 	      footer_text="  ↑↓ navigate  Enter select  Esc back")
 
 
+def _cycle_policy(app, attribute, options):
+	current = getattr(app.config, attribute)
+	setattr(app.config, attribute, options[(options.index(current) + 1) % len(options)])
+	firewall(app)
+
+
+def firewall(app):
+	config = app.config
+	items = [
+		urwid.CheckBox("  Enable UFW", state=config.ufw,
+		              on_state_change=_on_flag, user_data=(app, "ufw")),
+		urwid.Divider(),
+		_action(f"  Incoming  {config.ufw_incoming}",
+			lambda _: _cycle_policy(app, "ufw_incoming", ["deny", "reject", "allow"])),
+		_action(f"  Outgoing  {config.ufw_outgoing}",
+			lambda _: _cycle_policy(app, "ufw_outgoing", ["allow", "deny", "reject"])),
+		urwid.Text(("label", "      Incoming deny blocks all unsolicited connections, including SSH unless ticked.")),
+		urwid.Divider(),
+		urwid.Text(("bold", "  Allow rules")),
+	]
+	for rule_id, label, _rule in utils.firewall_rows():
+		items.append(urwid.CheckBox(
+			f"  {label}", state=rule_id in config.firewall_rules,
+			on_state_change=_on_toggle, user_data=(app, "firewall_rules", rule_id)))
+	_open(app, "Firewall (UFW)", _with_back(app, items),
+		footer_text="  ↑↓ navigate  Enter select  Space toggle  Esc back")
+
+
 # ── Advanced ───────────────────────────────────────────────────────────
 
 def _on_backports_repo(_box, state, app):
@@ -1086,6 +1114,9 @@ def advanced(app):
 		items += _described(
 			_action(f"  Debian mirror  {config.mirror}", lambda _: mirror(app)),
 			"Package source for the installed system. Used for online installs only.")
+	items += _described(
+		_action(f"  Firewall (UFW)  {'enabled' if config.ufw else 'disabled'}", lambda _: firewall(app)),
+		"Default policies and allow rules for common services.")
 	swappiness_edit = urwid.Edit("  Swappiness (0-100): ", str(config.swappiness))
 	urwid.connect_signal(swappiness_edit, "change", _on_swappiness, app)
 	items += [
@@ -1122,6 +1153,7 @@ def summary(app):
 		("Auto updates",   "yes" if config.auto_updates else "no"),
 		("Desktop",        config.desktop_label()),
 		("Mirror",         config.mirror),
+		("Firewall",       f"ufw, {config.ufw_incoming} in, {config.ufw_outgoing} out" if config.ufw else "no"),
 		("Components",     ", ".join(config.components) or "main only"),
 		("Hardware",       ", ".join(config.hardware_packages) or "none"),
 		("Software",       ", ".join(config.software_packages) or "none"),

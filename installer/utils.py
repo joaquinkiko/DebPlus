@@ -23,6 +23,7 @@ CUSTOM_DIR = os.path.join(OPTIONS_DIR, "custom")
 WMS_PATH = os.path.join(OPTIONS_DIR, "wms.list")
 EXTRAS_PATH = os.path.join(OPTIONS_DIR, "extras.list")
 MIRRORS_PATH = os.path.join(OPTIONS_DIR, "mirrors.list")
+FIREWALL_PATH = os.path.join(OPTIONS_DIR, "firewall.list")
 COMPONENTS_PATH = os.path.join(OPTIONS_DIR, "components.list")
 CUSTOM_PATH = os.path.join(OPTIONS_DIR, "custom.list")
 OPTIONAL_PATH = os.path.join(PACKAGES_DIR, "optional.list")
@@ -504,6 +505,16 @@ def extras_rows():
 def mirror_rows():
 	"""(label, url) per Debian mirror, default first."""
 	return _rows(MIRRORS_PATH)
+
+
+def firewall_rows():
+	"""(id, label, ufw rule) per firewall override."""
+	return [row[:3] for row in _rows(FIREWALL_PATH)]
+
+
+def firewall_default_ids():
+	"""Ids of firewall rules marked 'on' in firewall.list, ticked on a new install."""
+	return [row[0] for row in _rows(FIREWALL_PATH) if len(row) > 3 and row[3] == "on"]
 
 
 @functools.lru_cache(maxsize=None)

@@ -879,6 +879,20 @@ def configure_secure_boot(config: Config):
 	ok("Key queued. On first boot choose Enroll MOK and enter the password.")
 
 
+def configure_firewall(config: Config):
+	if not config.ufw:
+		return
+	msg("Configuring firewall...")
+	_chroot(["ufw", "default", config.ufw_incoming, "incoming"])
+	_chroot(["ufw", "default", config.ufw_outgoing, "outgoing"])
+	rules = {rule_id: rule for rule_id, _label, rule in utils.firewall_rows()}
+	for rule_id in config.firewall_rules:
+		_chroot(["ufw", *rules[rule_id].split()])
+	_chroot(["sed", "-i", "s/^ENABLED=.*/ENABLED=yes/", "/etc/ufw/ufw.conf"])
+	_chroot(["systemctl", "enable", "ufw"])
+	ok("Firewall configured")
+
+
 # ── Cleanup and orchestration ─────────────────────────────────────────
 
 def cleanup():
@@ -985,6 +999,7 @@ def run_install(config: Config):
 		("Users", lambda: create_users(config)),
 		("Desktop", desktop_stage),
 		("Extras", extras_stage),
+		("Firewall", lambda: configure_firewall(config)),
 		("Secure Boot", lambda: configure_secure_boot(config)),
 		("Bootloader", lambda: install_bootloader(config)),
 		("Snapshots", lambda: configure_snapper(config)),
