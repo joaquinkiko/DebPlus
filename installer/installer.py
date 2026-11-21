@@ -12,17 +12,19 @@ import shutil
 import subprocess
 import sys
 import termios
+import textwrap
+import threading
 import time
 
 from . import utils
+from .app import LOGO
 from .config import Config
 from .utils import (MNT, PROFILE, BIOS_BOOT_END_MIB, ESP_END_MIB,
                     get_partitions, keyboard_config)
 
 BOLD = "\033[1m"
-RED = "\033[0;31m"
-GREEN = "\033[0;32m"
-CYAN = "\033[0;36m"
+RED_BOLD = "\033[1;31m"
+GREEN_BOLD = "\033[1;32m"
 NC = "\033[0m"
 
 SUITE = PROFILE["SUITE"]
@@ -49,7 +51,6 @@ FIRST_PARTITION_START = "1MiB"
 
 LOG_PATH = "/var/log/debplus/install.log"
 STATE_PATH = "/run/debplus/state"
-ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
 
 LUKS_ROOT = "cryptroot"
 LUKS_SWAP = "cryptswap"
@@ -66,71 +67,169 @@ LOCAL_APT_OPTIONS = [
 ]
 
 PROGRESS_BAR_WIDTH = 40
+SPINNER_FRAMES = "|/-\\"
+SPINNER_INTERVAL = 0.12
 REBOOT_DELAY_SECONDS = 30
 
 
-class Progress:
-	"""Steps bar on the terminal's last row. Filled by finished steps, labelled with the current one."""
+class Ui:
+	"""Full-screen install view: centred logo, progress bar, current step with spinner, and messages."""
 
 	def __init__(self):
-		self.total = 0
-		self.done = 0
-		self.label = ""
-		self.active = False
+		self._lock = threading.Lock()
+		self._total = 0
+		self._done = 0
+		self._stage = ""
+		self._sub = ""
+		self._message = []
+		self._spinning = False
+		self._tick = 0
+		self._spin_stop = threading.Event()
+		self._spin_thread = None
+
+	def _layout(self):
+		size = shutil.get_terminal_size()
+		cols, rows = size.columns, size.lines
+		logo = [line.rstrip() for line in LOGO.splitlines()]
+		if cols < max(len(line) for line in logo) + 2:
+			logo = []
+		logo_width = max((len(line) for line in logo), default=0)
+		top = max(1, (rows - len(logo) - 12) // 2)
+		return {
+			"cols": cols,
+			"logo": logo,
+			"logo_col": max(1, (cols - logo_width) // 2 + 1),
+			"top": top,
+			"bar": top + len(logo) + 1,
+			"stage": top + len(logo) + 3,
+			"sub": top + len(logo) + 4,
+			"message": top + len(logo) + 6,
+		}
+
+	def _put(self, layout, row, text, code=""):
+		"""Write text centred on row. Returns the column just after it."""
+		col = max(1, (layout["cols"] - len(text)) // 2 + 1)
+		sys.stdout.write(f"\x1b[{row};1H\x1b[2K\x1b[{row};{col}H{code}{text}{NC}")
+		return col + len(text)
+
+	def _draw_bar_locked(self, layout):
+		width = PROGRESS_BAR_WIDTH
+		filled = self._done * width // self._total if self._total else 0
+		step = min(self._done + 1, self._total)
+		self._put(layout, layout["bar"], f"[{'#' * filled}{'-' * (width - filled)}]  {step}/{self._total}")
+
+	def _draw_sub_locked(self):
+		layout = self._layout()
+		text = self._sub
+		if self._spinning:
+			text = f"{SPINNER_FRAMES[self._tick % len(SPINNER_FRAMES)]} {text}"
+		self._put(layout, layout["sub"], text)
+		sys.stdout.flush()
+
+	def _draw_locked(self):
+		layout = self._layout()
+		sys.stdout.write("\x1b[2J\x1b[H")
+		for index, line in enumerate(layout["logo"]):
+			sys.stdout.write(f"\x1b[{layout['top'] + index};{layout['logo_col']}H{line}")
+		self._draw_bar_locked(layout)
+		self._put(layout, layout["stage"], self._stage, BOLD)
+		self._put(layout, layout["sub"], self._sub)
+		for index, entry in enumerate(self._message):
+			code, text = entry if isinstance(entry, tuple) else ("", entry)
+			self._put(layout, layout["message"] + index, text, code)
+		sys.stdout.flush()
 
 	def start(self, total):
-		self.total = total
-		self.active = True
-		rows = shutil.get_terminal_size().lines
-		sys.stdout.write(f"\x1b[1;{rows - 1}r")  # scrolling stops above the bar row
-		sys.stdout.flush()
-		self._draw()
+		with self._lock:
+			self._total = total
+			self._done = 0
+			self._draw_locked()
 
-	def stop(self):
-		if not self.active:
-			return
-		self.active = False
-		rows = shutil.get_terminal_size().lines
-		sys.stdout.write(f"\x1b7\x1b[{rows};1H\x1b[2K\x1b[r\x1b8")
-		sys.stdout.flush()
-
-	def start_stage(self, label):
-		self.label = label
-		self._draw()
+	def begin_stage(self, label):
+		with self._lock:
+			self._stage = label
+			self._sub = ""
+			self._draw_locked()
 
 	def finish_stage(self):
-		self.done += 1
-		self._draw()
+		with self._lock:
+			self._done += 1
+			self._draw_bar_locked(self._layout())
+			sys.stdout.flush()
 
-	def _draw(self):
-		if not self.active:
+	def set_sub(self, text):
+		with self._lock:
+			self._sub = text
+			self._draw_sub_locked()
+
+	def current_sub(self):
+		with self._lock:
+			return self._sub
+
+	def show_message(self, lines):
+		"""Centred lines under the progress view. Each entry is text or (ansi_code, text)."""
+		with self._lock:
+			self._message = lines
+			self._draw_locked()
+
+	def redraw(self):
+		with self._lock:
+			self._draw_locked()
+
+	def prompt(self, question, hint=""):
+		"""Centred question under the messages, with the cursor left after it for input()."""
+		with self._lock:
+			layout = self._layout()
+			row = layout["message"] + len(self._message) + 1
+			end_col = self._put(layout, row, question)
+			if hint:
+				self._put(layout, row + 1, hint)
+			sys.stdout.write(f"\x1b[{row};{end_col}H")
+			sys.stdout.flush()
+
+	def start_spinner(self):
+		if self._spin_thread:
 			return
-		filled = self.done * PROGRESS_BAR_WIDTH // self.total
-		bar = "#" * filled + "-" * (PROGRESS_BAR_WIDTH - filled)
-		step = min(self.done + 1, self.total)
-		rows = shutil.get_terminal_size().lines
-		sys.stdout.write(f"\x1b7\x1b[{rows};1H\x1b[2K  [{bar}]  {self.label} {step}/{self.total}\x1b8")
-		sys.stdout.flush()
+		self._spin_stop.clear()
+		self._spinning = True
+		self._spin_thread = threading.Thread(target=self._spin, daemon=True)
+		self._spin_thread.start()
+
+	def _spin(self):
+		while not self._spin_stop.wait(SPINNER_INTERVAL):
+			with self._lock:
+				self._tick += 1
+				self._draw_sub_locked()
+
+	def stop_spinner(self):
+		if not self._spin_thread:
+			return
+		self._spin_stop.set()
+		self._spin_thread.join()
+		self._spin_thread = None
+		with self._lock:
+			self._spinning = False
+			self._draw_sub_locked()
 
 
-PROGRESS = Progress()
+ui = Ui()
 
 
 # ── Output and command helpers ─────────────────────────────────────────
 
-def _emit(text, stream=sys.stdout):
-	print(text, file=stream)
+def _log(text):
 	os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
 	with open(LOG_PATH, "a") as log_file:
-		log_file.write(ANSI_PATTERN.sub("", text) + "\n")
+		log_file.write(text + "\n")
 
 
 def msg(text):
-	_emit(f"\n  {CYAN}{BOLD}::{NC} {BOLD}{text}{NC}")
+	ui.set_sub(text)
+	_log(f":: {text}")
 
 
 def ok(text):
-	_emit(f"  {GREEN}{text}{NC}")
+	_log(f"   {text}")
 
 
 class StageError(Exception):
@@ -141,13 +240,17 @@ def die(text):
 	raise StageError(text)
 
 
-def _run(argv, quiet=False):
+def _execute(argv):
+	"""Run argv with its output going to the install log. Returns the exit status."""
+	_log(f"$ {shlex.join(argv)}")
+	with open(LOG_PATH, "a") as log_file:
+		return subprocess.run(argv, stdout=log_file, stderr=subprocess.STDOUT).returncode
+
+
+def _run(argv):
 	"""Run argv, raising StageError on failure."""
-	result = subprocess.run(argv, capture_output=quiet, text=True)
-	if result.returncode != 0:
-		detail = f"\n{result.stderr}" if quiet else ""
-		die(f"Command failed: {shlex.join(argv)}{detail}")
-	return result
+	if _execute(argv) != 0:
+		die(f"Command failed: {shlex.join(argv)}")
 
 
 def _try(argv):
@@ -155,17 +258,17 @@ def _try(argv):
 	subprocess.run(argv, capture_output=True)
 
 
-def _chroot(argv, quiet=False):
-	return _run(["chroot", MNT, *argv], quiet)
+def _chroot(argv):
+	_run(["chroot", MNT, *argv])
 
 
 def _chroot_ok(argv):
-	"""Run in the chroot with output shown, returning success instead of raising."""
-	return subprocess.run(["chroot", MNT, *argv]).returncode == 0
+	"""Run in the chroot, returning success instead of raising."""
+	return _execute(["chroot", MNT, *argv]) == 0
 
 
-def _apt(arguments, quiet=False):
-	return _chroot([*APT_COMMAND, *arguments], quiet)
+def _apt(arguments):
+	_chroot([*APT_COMMAND, *arguments])
 
 
 def _unmount(path, lazy=False, recursive=False):
@@ -191,11 +294,11 @@ def _clear_directory(path):
 
 
 def _report(label, succeeded, hint):
-	"""Report an optional step's outcome. Failure is recorded by the caller, not raised."""
+	"""Record an optional step's outcome in the log. Failure is collected by the caller."""
 	if succeeded:
 		ok(f"{label} installed")
 		return True
-	print(f"  {RED}{label} failed. {hint}{NC}")
+	_log(f"{label} failed. {hint}")
 	return False
 
 
@@ -242,8 +345,8 @@ def _boot_partition(uefi):
 
 
 def _apply_partitions(config: Config, roles, parted_args):
-	_run(["wipefs", "-af", config.disk], quiet=True)
-	_run(["parted", "-s", config.disk, *parted_args], quiet=True)
+	_run(["wipefs", "-af", config.disk])
+	_run(["parted", "-s", config.disk, *parted_args])
 	partitions = _wait_for_partitions(config.disk, len(roles))
 	config.layout = {role: {"device": device, "format": role != "bios_grub"}
 	                 for role, device in zip(roles, partitions)}
@@ -332,7 +435,7 @@ def _partition_free_space(config: Config):
 	label = utils.partition_table_type(config.disk)
 	segments = _custom_segments(config, start_mib, end_mib, disk_mib)
 	existing = get_partitions(config.disk)
-	_run(["parted", "-s", config.disk, *_mkpart_args(label, segments)], quiet=True)
+	_run(["parted", "-s", config.disk, *_mkpart_args(label, segments)])
 	created = _wait_for_new_partitions(config.disk, existing, len(segments))
 	config.layout = {role: {"device": device, "format": True}
 	                 for (role, *_rest), device in zip(segments, created)}
@@ -341,11 +444,11 @@ def _partition_free_space(config: Config):
 
 
 def _format_layout(config: Config):
-	msg("Formatting...")
 	for role, part in config.layout.items():
 		if not part["format"] or (role == "swap" and config.luks):
 			continue
 		device = _device(config, role)
+		msg(f"Formatting {role} ({device})")
 		if role == "esp":
 			_run(["mkfs.fat", "-F32", device])
 		elif role == "swap":
@@ -413,13 +516,14 @@ def _close_mappers():
 
 
 def _encrypt_layout(config: Config):
-	msg("Encrypting...")
 	root = config.layout["root"]["device"]
+	msg(f"Encrypting root ({root})")
 	_cryptsetup(["luksFormat", "--type", "luks2", "--batch-mode", "--key-file=-", root],
 	            config.luks_pass)
 	_cryptsetup(["open", "--key-file=-", root, LUKS_ROOT], config.luks_pass)
 	if "swap" in config.layout:
 		swap = config.layout["swap"]["device"]
+		msg(f"Encrypting swap ({swap})")
 		os.makedirs(os.path.dirname(SWAP_KEY_LIVE), exist_ok=True)
 		with open(SWAP_KEY_LIVE, "wb") as key_file:
 			key_file.write(os.urandom(64))
@@ -434,9 +538,9 @@ def partition_disk(config: Config):
 	_unmount(MNT, lazy=True, recursive=True)
 	_close_mappers()
 	if config.manual:
-		msg("Using selected partitions...")
+		msg("Using selected partitions")
 	else:
-		msg(f"Partitioning {config.disk}...")
+		msg(f"Partitioning {config.disk}")
 		if config.free_space:
 			_partition_free_space(config)
 		elif config.custom:
@@ -447,6 +551,7 @@ def partition_disk(config: Config):
 	if config.luks:
 		_encrypt_layout(config)
 	_format_layout(config)
+	msg("Mounting filesystems")
 	_mount_layout(config)
 	ok("Partitioned and mounted")
 
@@ -549,7 +654,7 @@ def _unmount_all():
 
 def reset_identity():
 	"""The image is shared by every install, so give this one its own identity."""
-	msg("Resetting machine identity...")
+	msg("Resetting machine identity")
 	_write_target("/etc/machine-id", "")  # empty: systemd generates a new id on first boot
 	_remove(f"{MNT}/var/lib/dbus/machine-id")
 	try:
@@ -568,14 +673,14 @@ def _install_from_local_repo(packages):
 	repo = utils.target_repo()
 	if not repo:
 		die("Package repo not found on the install medium.")
-	msg("Installing selected packages from the install medium...")
+	msg("Installing packages from the install medium (apt)")
 	mount_point = f"{MNT}{LOCAL_REPO_MOUNT}"
 	os.makedirs(mount_point, exist_ok=True)
 	_run(["mount", "--bind", repo, mount_point])
 	try:
 		_write_target("/etc/apt/debplus-local.list", f"deb [trusted=yes] file:{LOCAL_REPO_MOUNT} ./\n")
-		_apt([*LOCAL_APT_OPTIONS, "update"], quiet=True)
-		_apt([*LOCAL_APT_OPTIONS, "install", "-y", "--no-install-recommends", *packages], quiet=True)
+		_apt([*LOCAL_APT_OPTIONS, "update"])
+		_apt([*LOCAL_APT_OPTIONS, "install", "-y", "--no-install-recommends", *packages])
 	finally:
 		_unmount(mount_point)
 		_try(["rmdir", mount_point])
@@ -594,16 +699,18 @@ def install_packages(config: Config):
 			_install_from_local_repo(packages)
 		return
 
-	msg("Updating packages...")
+	msg("Getting package lists (apt update)")
 	_apt(["update"])
 	if packages:
+		msg("Installing packages (apt)")
 		_apt(["install", "-y", "--no-install-recommends", *packages])
+	msg("Upgrading installed packages (apt)")
 	_apt(["upgrade", "-y"])
 	if config.backports_kernel:
-		msg("Installing backports kernel...")
+		msg("Installing backports kernel (apt)")
 		_apt(["install", "-y", "-t", BACKPORTS, "linux-image-amd64", "linux-headers-amd64"])
 	if config.backports_mesa:
-		msg("Installing backports Mesa...")
+		msg("Installing backports Mesa (apt)")
 		_apt(["install", "-y", "-t", BACKPORTS, *utils.mesa_packages()])
 	_chroot(["apt-get", "clean"])
 
@@ -613,15 +720,17 @@ def install_base(config: Config):
 	if not image:
 		die("Base system image not found on the install medium.")
 	_unmount_all()
-	msg("Extracting base system (this will take a while)...")
+	msg("Extracting base system")
 	_run(["unsquashfs", "-f", "-n", "-d", MNT, image])
 	_remove(f"{MNT}/etc/resolv.conf")
 	shutil.copy2("/etc/resolv.conf", f"{MNT}/etc/resolv.conf")
 	mount_secondary(config)
+	msg("Configuring apt sources")
 	write_apt_sources(config)
 	mount_chroot_fs()
 	reset_identity()
 	if config.multiarch_i386:
+		msg("Enabling 32-bit (i386) architecture")
 		_chroot(["dpkg", "--add-architecture", "i386"])
 	install_packages(config)
 	ok("Base system installed")
@@ -630,7 +739,7 @@ def install_base(config: Config):
 # ── System configuration ──────────────────────────────────────────────
 
 def configure_encryption(config: Config):
-	msg("Configuring encryption...")
+	msg("Configuring encryption")
 	lines = [f"{LUKS_ROOT} UUID={_blkid(config.layout['root']['device'], 'UUID')} none luks"]
 	if "swap" in config.layout:
 		os.makedirs(f"{MNT}/etc/luks", exist_ok=True)
@@ -648,7 +757,7 @@ def configure_encryption(config: Config):
 def configure_snapper(config: Config):
 	if not config.snapper:
 		return
-	msg("Configuring snapper...")
+	msg("Configuring snapper")
 	if not os.path.isfile(f"{MNT}/etc/snapper/configs/root"):
 		_chroot(["snapper", "-c", "root", "create-config", "/"])
 	if not os.path.isdir(f"{MNT}/.snapshots/1"):
@@ -657,7 +766,7 @@ def configure_snapper(config: Config):
 
 
 def configure_auto_updates():
-	msg("Enabling security updates...")
+	msg("Enabling security updates")
 	_write_target("/etc/apt/apt.conf.d/20auto-upgrades",
 	              'APT::Periodic::Update-Package-Lists "1";\n'
 	              'APT::Periodic::Unattended-Upgrade "1";\n')
@@ -675,7 +784,7 @@ def enable_locale(locale_name):
 
 
 def configure_system(config: Config):
-	msg("Configuring system...")
+	msg("Writing system configuration")
 	write_fstab(config)
 	_write_target("/etc/hostname", config.hostname + "\n")
 	_write_target("/etc/hosts",
@@ -686,6 +795,7 @@ def configure_system(config: Config):
 	              "ff02::1     ip6-allnodes\n"
 	              "ff02::2     ip6-allrouters\n")
 
+	msg("Generating locale")
 	enable_locale(config.locale)
 	_chroot(["locale-gen"])
 	_write_target("/etc/default/locale", f"LANG={config.locale}\n")
@@ -703,7 +813,7 @@ def configure_system(config: Config):
 	if config.auto_updates:
 		configure_auto_updates()
 
-	msg("Rebuilding initramfs...")  # fstab and crypttab exist now
+	msg("Rebuilding initramfs")  # fstab and crypttab exist now
 	_chroot(["update-initramfs", "-u", "-k", "all"])
 	ok("System configured")
 
@@ -734,7 +844,7 @@ def _chpasswd(line):
 
 
 def create_users(config: Config):
-	msg("Creating users...")
+	msg("Creating users")
 	_chroot(["groupadd", "-f", "lpadmin"])
 	user_known = subprocess.run(["chroot", MNT, "id", config.username],
 	                            capture_output=True).returncode == 0
@@ -757,7 +867,7 @@ def _fetch_wm_source(repo, ref, clone_path):
 		try:
 			shutil.copytree(repo, f"{MNT}{clone_path}", dirs_exist_ok=True)
 		except OSError as error:
-			print(f"  {RED}Cannot copy {repo}: {error}{NC}")
+			_log(f"Cannot copy {repo}: {error}")
 			return False
 		return True
 	branch = [] if ref == "-" else ["--branch", ref]
@@ -772,13 +882,14 @@ def install_window_manager(config: Config) -> bool:
 	if entry is None:
 		return True
 	wm_id, label, repo, ref, _description = entry
-	msg(f"Installing {label}...")
+	msg(f"Fetching {label}")
 
 	clone_path = f"/tmp/wm-{wm_id}"
 	try:
 		if not _fetch_wm_source(repo, ref, clone_path):
-			print(f"  {RED}{label} source unavailable.{NC}")
+			_log(f"{label} source unavailable.")
 			return False
+		msg(f"Installing {label}")
 		return _report(label, _chroot_ok(["bash", f"{clone_path}/install.sh"]),
 		               "Fix it from Shell, or rerun its install.sh.")
 	finally:
@@ -793,7 +904,7 @@ def install_extras(config: Config) -> list:
 		if package in custom_ids or not utils.needs_network(package):
 			continue  # custom scripts run separately; local-repo packages are already installed
 		label = labels.get(package, package)
-		msg(f"Installing {label}...")
+		msg(f"Installing {label} (apt)")
 		if not _report(label, _chroot_ok([*APT_COMMAND, "install", "-y", package]),
 		               f"Fix it from Shell, or rerun: apt-get install {package}"):
 			failed.append(label)
@@ -806,7 +917,7 @@ def install_custom_software(config: Config) -> list:
 	for custom_id, _menu, _section, label, script, _requirement in utils.custom_rows():
 		if custom_id not in selected:
 			continue
-		msg(f"Installing {label}...")
+		msg(f"Installing {label}")
 		staged_path = f"{MNT}/tmp/{script}"
 		try:
 			shutil.copy2(os.path.join(utils.CUSTOM_DIR, script), staged_path)
@@ -831,7 +942,7 @@ def _install_removable_fallback():
 
 
 def install_bootloader(config: Config):
-	msg(f"Installing bootloader ({config.boot_mode})...")
+	msg(f"Installing bootloader ({config.boot_mode})")
 	if config.boot_mode == BOOT_UEFI:
 		_chroot(["grub-install", "--target=x86_64-efi", "--efi-directory=/boot/efi",
 		         "--bootloader-id=debian", "--recheck"])
@@ -843,6 +954,7 @@ def install_bootloader(config: Config):
 		_chroot(["grub-install", "--target=i386-pc", "--recheck", config.disk])
 	if config.dual_boot:
 		_write_target("/etc/default/grub", "GRUB_DISABLE_OS_PROBER=false\n", append=True)
+	msg("Updating GRUB configuration")
 	_chroot(["update-grub"])
 	ok("Bootloader installed")
 
@@ -850,7 +962,7 @@ def install_bootloader(config: Config):
 def configure_secure_boot(config: Config):
 	if not config.needs_mok():
 		return
-	msg("Setting up Secure Boot signing...")
+	msg("Setting up Secure Boot signing")
 	key_dir = f"{MNT}/var/lib/dkms"
 	os.makedirs(key_dir, exist_ok=True)
 	_chroot(["openssl", "req", "-new", "-x509", "-newkey", "rsa:2048", "-nodes",
@@ -869,6 +981,7 @@ def configure_secure_boot(config: Config):
 	kernel_versions = sorted(os.listdir(modules_dir)) if os.path.isdir(modules_dir) else []
 	for version in kernel_versions:
 		if os.path.isdir(f"{MNT}/usr/src/linux-headers-{version}"):
+			msg(f"Signing DKMS modules for {version}")
 			_chroot(["dkms", "autoinstall", "-k", version])
 
 	result = subprocess.run(["mokutil", "--import", f"{key_dir}/mok.der"],
@@ -882,7 +995,7 @@ def configure_secure_boot(config: Config):
 def configure_firewall(config: Config):
 	if not config.ufw:
 		return
-	msg("Configuring firewall...")
+	msg("Configuring firewall")
 	_chroot(["ufw", "default", config.ufw_incoming, "incoming"])
 	_chroot(["ufw", "default", config.ufw_outgoing, "outgoing"])
 	rules = {rule_id: rule for rule_id, _label, rule in utils.firewall_rows()}
@@ -894,7 +1007,7 @@ def configure_firewall(config: Config):
 
 
 def configure_git(config: Config):
-	msg("Configuring git...")
+	msg("Configuring git")
 	settings = [
 		("init.defaultBranch", config.git_default_branch),
 		("core.editor", config.git_editor),
@@ -911,8 +1024,8 @@ def configure_git(config: Config):
 # ── Cleanup and orchestration ─────────────────────────────────────────
 
 def cleanup():
-	PROGRESS.stop()
-	msg("Unmounting...")
+	ui.stop_spinner()
+	msg("Unmounting")
 	if os.path.isdir(f"{MNT}/var/log"):
 		try:
 			shutil.copy2(LOG_PATH, f"{MNT}/var/log/debplus-install.log")
@@ -928,22 +1041,26 @@ def _reboot():
 
 
 def _open_shell():
+	sys.stdout.write("\x1b[2J\x1b[H")
+	sys.stdout.flush()
 	if os.path.isdir(f"{MNT}/etc"):
 		subprocess.run(["chroot", MNT, "/bin/bash"])
 	else:
 		subprocess.run(["/bin/bash"])
+	ui.redraw()
 
 
 def _choose(question, keys):
 	"""Prompt until the reply's first letter is in keys. Returns the last key on EOF."""
+	ui.prompt(question)
 	while True:
 		try:
-			reply = input(f"\n  {BOLD}{question}{NC} ").strip().lower()[:1]
+			reply = input().strip().lower()[:1]
 		except (EOFError, KeyboardInterrupt):
 			return keys[-1]
 		if reply in keys:
 			return reply
-		print("  Enter one of the letters shown.")
+		ui.prompt(question, "Enter one of the letters shown.")
 
 
 def _choose_with_shell(question, keys):
@@ -961,11 +1078,6 @@ def _mark_done(label):
 		state_file.write(label + "\n")
 
 
-def _clear_screen():
-	sys.stdout.write("\x1b[2J\x1b[3J\x1b[H")
-	sys.stdout.flush()
-
-
 def _flush_input():
 	"""Drop keys pressed during the install so they don't trigger the reboot prompt."""
 	try:
@@ -974,28 +1086,42 @@ def _flush_input():
 		pass
 
 
-def _run_stage(index, total, label, action):
-	msg(f"[{index}/{total}] {label}")
-	PROGRESS.start_stage(label)
+def _failure_lines(label, failed_at, error):
+	lines = [(RED_BOLD, f"{label} failed")]
+	if failed_at:
+		lines.append(f"at: {failed_at}")
+	lines += textwrap.wrap(str(error), 70)
+	lines += ["", f"Log: {LOG_PATH}"]
+	return lines
+
+
+def _run_stage(label, action):
+	ui.begin_stage(label)
 	while True:
+		ui.start_spinner()
 		try:
 			action()
-			_mark_done(label)
-			PROGRESS.finish_stage()
-			return
 		except Exception as error:
-			_emit(f"\n  {RED}{BOLD}Error:{NC} {label} failed: {error}", sys.stderr)
+			ui.stop_spinner()
+			failed_at = ui.current_sub()
+			_log(f"Error: {label} failed at '{failed_at}': {error}")
+			ui.show_message(_failure_lines(label, failed_at, error))
 			choice = _choose_with_shell("(R)etry, (S)hell, Re(b)oot, or (A)bort?", "rsba")
+			ui.show_message([])
 			if choice == "r":
+				ui.begin_stage(label)
 				continue
 			cleanup()
 			if choice == "b":
 				_reboot()
 			sys.exit(1)
+		ui.stop_spinner()
+		_mark_done(label)
+		ui.finish_stage()
+		return
 
 
 def run_install(config: Config):
-	_clear_screen()
 	_try(["hostname", config.hostname])
 	failures = []
 
@@ -1020,36 +1146,37 @@ def run_install(config: Config):
 		("Bootloader", lambda: install_bootloader(config)),
 		("Snapshots", lambda: configure_snapper(config)),
 	]
-	PROGRESS.start(len(stages))
-	_emit(f"\n  {BOLD}{CYAN}Installing {PROFILE['PROFILE_NAME']}{NC}\n")
+	ui.start(len(stages))
 	try:
-		for index, (label, action) in enumerate(stages, 1):
-			_run_stage(index, len(stages), label, action)
+		for label, action in stages:
+			_run_stage(label, action)
 	except KeyboardInterrupt:
 		cleanup()
 		raise
 
-	PROGRESS.stop()
-	_clear_screen()
+	ui.stop_spinner()
 	if failures:
-		_emit(f"\n  {RED}{BOLD}Installed with errors:{NC}")
-		for failure in failures:
-			_emit(f"  {RED}- {failure}{NC}")
+		lines = [(RED_BOLD, "Installed with errors")] + [f"- {failure}" for failure in failures]
+		ui.show_message(lines)
 		choice = _choose_with_shell("(R)eboot, (S)hell, or (A)bort?", "rsa")
 		cleanup()
 		if choice == "r":
 			_reboot()
 		return
 
-	_emit(f"\n  {GREEN}{BOLD}Installation complete!{NC}")
-	_emit("\n  Remove the installation media if the firmware boots it first.")
-	_emit("  Press Enter to reboot now, or Ctrl+C to stay in the live system.")
-	_emit(f"  Rebooting automatically in {REBOOT_DELAY_SECONDS} seconds.")
+	ui.set_sub("")
+	ui.show_message([
+		(GREEN_BOLD, f"{PROFILE['PROFILE_NAME']} installation complete!"),
+		"",
+		"Remove the installation media if the firmware boots it first.",
+		"Press Enter to reboot now, or Ctrl+C to stay in the live system.",
+		f"Rebooting automatically in {REBOOT_DELAY_SECONDS} seconds.",
+	])
 	_flush_input()
 	try:
 		ready, _, _ = select.select([sys.stdin], [], [], REBOOT_DELAY_SECONDS)
 	except KeyboardInterrupt:
-		_emit("\n  Reboot cancelled. Target is still mounted at " + MNT + ".")
+		ui.show_message(["Reboot cancelled.", f"Target is still mounted at {MNT}."])
 		return
 	if ready:
 		sys.stdin.readline()
