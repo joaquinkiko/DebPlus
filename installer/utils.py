@@ -45,6 +45,8 @@ ZONEINFO_DIR = Path("/usr/share/zoneinfo")
 ZONE_REGIONS = ("Africa", "America", "Antarctica", "Asia", "Atlantic",
                 "Australia", "Europe", "Indian", "Pacific")
 
+BOOT_PARTITION_GIB = 1
+
 MIN_RAM_MIB = 1024
 WARN_RAM_MIB = 2048
 MIN_DISK_GIB = 10

@@ -19,7 +19,7 @@ import time
 from . import utils
 from .app import LOGO
 from .config import Config
-from .utils import (MNT, PROFILE, BIOS_BOOT_END_MIB, ESP_END_MIB,
+from .utils import (MNT, PROFILE, BIOS_BOOT_END_MIB, BOOT_PARTITION_GIB, ESP_END_MIB,
                     get_partitions, keyboard_config)
 
 BOLD = "\033[1m"
@@ -35,6 +35,8 @@ SECURITY_MIRROR = "http://security.debian.org/debian-security"
 EFIVARS_HOST = "/sys/firmware/efi/efivars"
 BOOT_UEFI = "uefi"
 BOOT_BIOS = "bios"
+
+GRUB_MODULES = ("part_gpt part_msdos ext2 btrfs xfs search search_fs_uuid normal")
 
 PARTED_FS_HINT = {"btrfs": "btrfs", "ext4": "ext4", "xfs": "ext2"}
 MKFS_COMMANDS = {
@@ -53,8 +55,6 @@ LOG_PATH = "/var/log/debplus/install.log"
 STATE_PATH = "/run/debplus/state"
 
 LUKS_ROOT = "cryptroot"
-LUKS_SWAP = "cryptswap"
-SWAP_KEY_LIVE = "/run/debplus/swap.key"
 
 LOCAL_REPO_MOUNT = "/media/debplus-repo"  # inside the target, only during install
 APT_COMMAND = ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get"]
@@ -360,10 +360,16 @@ def _partition_auto(config: Config):
 	swap_start = f"{disk_mib - swap_gib * 1024}MiB"
 	boot_roles, boot_args, boot_end_mib = _boot_partition(config.boot_mode == BOOT_UEFI)
 
-	parted_args = ["mklabel", "gpt", *boot_args, "mkpart", "root",
-	               PARTED_FS_HINT[config.filesystem], f"{boot_end_mib}MiB",
-	               swap_start if swap_gib else "100%"]
-	roles = [*boot_roles, "root"]
+	roles = [*boot_roles]
+	parted_args = ["mklabel", "gpt", *boot_args]
+	if config.luks:
+		split_mib = boot_end_mib + BOOT_PARTITION_GIB * 1024
+		parted_args += ["mkpart", "boot", "ext4", f"{boot_end_mib}MiB", f"{split_mib}MiB"]
+		roles.append("boot")
+		boot_end_mib = split_mib
+	parted_args += ["mkpart", "root", PARTED_FS_HINT[config.filesystem],
+	                f"{boot_end_mib}MiB", swap_start if swap_gib else "100%"]
+	roles.append("root")
 	if swap_gib:
 		roles.append("swap")
 		parted_args += ["mkpart", "swap", "linux-swap", swap_start, "100%"]
@@ -372,6 +378,11 @@ def _partition_auto(config: Config):
 
 def _custom_segments(config: Config, first_mib, last_mib, disk_mib):
 	"""(role, parted type, start, end) for custom sizes filling first_mib to last_mib. Swap sits last."""
+	boot_segments = []
+	if config.luks:
+		boot_end_mib = first_mib + BOOT_PARTITION_GIB * 1024
+		boot_segments = [("boot", "ext4", f"{first_mib}MiB", f"{boot_end_mib}MiB")]
+		first_mib = boot_end_mib
 	swap_gib = config.custom_swap_gib
 	root_gib = config.custom_root_gib
 	home_gib = config.custom_home_gib
@@ -393,7 +404,7 @@ def _custom_segments(config: Config, first_mib, last_mib, disk_mib):
 		segments.append(("home", fs_hint, f"{root_end_mib}MiB", end_arg(home_end_mib)))
 	if swap_gib:
 		segments.append(("swap", "linux-swap", f"{avail_end_mib}MiB", end_arg(last_mib)))
-	return segments
+	return boot_segments + segments
 
 
 def _partition_custom(config: Config):
@@ -444,17 +455,26 @@ def _partition_free_space(config: Config):
 
 
 def _format_layout(config: Config):
+	msg("Formatting...")
 	for role, part in config.layout.items():
-		if not part["format"] or (role == "swap" and config.luks):
+		if not part["format"]:
 			continue
 		device = _device(config, role)
-		msg(f"Formatting {role} ({device})")
 		if role == "esp":
 			_run(["mkfs.fat", "-F32", device])
+		elif role == "boot":
+			_run(["mkfs.ext4", "-qF", device])
 		elif role == "swap":
 			_run(["mkswap", device])
 		elif role in ("root", "home"):
 			_make_filesystem(device, config.filesystem)
+
+def mount_boot(config: Config):
+	"""Mount the unencrypted /boot before extraction so the kernel lands on it."""
+	if "boot" not in config.layout:
+		return
+	os.makedirs(f"{MNT}/boot", exist_ok=True)
+	_run(["mount", config.layout["boot"]["device"], f"{MNT}/boot"])
 
 
 def _mount_layout(config: Config):
@@ -493,11 +513,9 @@ def mount_secondary(config: Config):
 
 
 def _device(config: Config, role):
-	"""Device to format or mount for a role. Encrypted roles use their open mapper."""
+	"""Device to format or mount for a role. The encrypted root uses its open mapper."""
 	if config.luks and role == "root":
 		return f"/dev/mapper/{LUKS_ROOT}"
-	if config.luks and role == "swap":
-		return f"/dev/mapper/{LUKS_SWAP}"
 	return config.layout[role]["device"]
 
 
@@ -510,28 +528,15 @@ def _cryptsetup(args, passphrase=None):
 
 def _close_mappers():
 	"""Release LUKS mappers left open by an earlier attempt."""
-	_try(["swapoff", f"/dev/mapper/{LUKS_SWAP}"])
-	_try(["cryptsetup", "close", LUKS_SWAP])
 	_try(["cryptsetup", "close", LUKS_ROOT])
 
 
 def _encrypt_layout(config: Config):
 	root = config.layout["root"]["device"]
 	msg(f"Encrypting root ({root})")
-	_cryptsetup(["luksFormat", "--type", "luks2", "--batch-mode", "--key-file=-", root],
-	            config.luks_pass)
+	_cryptsetup(["luksFormat", "--type", "luks2", "--pbkdf", "pbkdf2",
+	             "--batch-mode", "--key-file=-", root], config.luks_pass)
 	_cryptsetup(["open", "--key-file=-", root, LUKS_ROOT], config.luks_pass)
-	if "swap" in config.layout:
-		swap = config.layout["swap"]["device"]
-		msg(f"Encrypting swap ({swap})")
-		os.makedirs(os.path.dirname(SWAP_KEY_LIVE), exist_ok=True)
-		with open(SWAP_KEY_LIVE, "wb") as key_file:
-			key_file.write(os.urandom(64))
-		os.chmod(SWAP_KEY_LIVE, 0o600)
-		_cryptsetup(["luksFormat", "--type", "luks2", "--batch-mode",
-		             f"--key-file={SWAP_KEY_LIVE}", swap])
-		_cryptsetup(["open", f"--key-file={SWAP_KEY_LIVE}", swap, LUKS_SWAP])
-		_run(["mkswap", f"/dev/mapper/{LUKS_SWAP}"])
 
 
 def partition_disk(config: Config):
@@ -570,6 +575,8 @@ def _fstab_rows(config: Config):
 	elif btrfs:
 		rows.append((root, "/home", "btrfs",
 		             FSTAB_OPTIONS["btrfs"] + ",subvol=@home", 2))
+	if "boot" in layout:
+		rows.append((layout["boot"]["device"], "/boot", "ext4", "errors=remount-ro", 2))
 	if "esp" in layout:
 		rows.append((layout["esp"]["device"], "/boot/efi", "vfat", "umask=0077", 2))
 	if "swap" in layout:
@@ -648,7 +655,7 @@ def packages_to_install(config: Config) -> list:
 
 def _unmount_all():
 	"""Release chroot and secondary mounts so a retried extraction starts clean."""
-	for sub in ("sys/firmware/efi/efivars", "sys", "proc", "dev/pts", "dev", "boot/efi", "home"):
+	for sub in ("sys/firmware/efi/efivars", "sys", "proc", "dev/pts", "dev", "boot/efi", "boot", "home"):
 		_unmount(f"{MNT}/{sub}", lazy=True)
 
 
@@ -720,6 +727,7 @@ def install_base(config: Config):
 	if not image:
 		die("Base system image not found on the install medium.")
 	_unmount_all()
+	mount_boot(config)
 	msg("Extracting base system")
 	_run(["unsquashfs", "-f", "-n", "-d", MNT, image])
 	_remove(f"{MNT}/etc/resolv.conf")
@@ -739,19 +747,11 @@ def install_base(config: Config):
 # ── System configuration ──────────────────────────────────────────────
 
 def configure_encryption(config: Config):
-	msg("Configuring encryption")
-	lines = [f"{LUKS_ROOT} UUID={_blkid(config.layout['root']['device'], 'UUID')} none luks"]
-	if "swap" in config.layout:
-		os.makedirs(f"{MNT}/etc/luks", exist_ok=True)
-		shutil.copy2(SWAP_KEY_LIVE, f"{MNT}/etc/luks/swap.key")
-		os.chmod(f"{MNT}/etc/luks/swap.key", 0o600)
-		lines.append(f"{LUKS_SWAP} UUID={_blkid(config.layout['swap']['device'], 'UUID')} "
-		             f"/etc/luks/swap.key luks")
-	_write_target("/etc/crypttab", "\n".join(lines) + "\n")
-	with open(f"{MNT}/etc/default/grub") as grub_file:
-		if "GRUB_ENABLE_CRYPTODISK=y" not in grub_file.read():
-			_write_target("/etc/default/grub", "GRUB_ENABLE_CRYPTODISK=y\n", append=True)
+	msg("Configuring encryption...")
+	line = f"{LUKS_ROOT} UUID={_blkid(config.layout['root']['device'], 'UUID')} none luks"
+	_write_target("/etc/crypttab", line + "\n")
 	ok("Encryption configured")
+	
 
 
 def configure_snapper(config: Config):
@@ -941,17 +941,32 @@ def _install_removable_fallback():
 		shutil.copy2(f"{source_dir}/{name}", f"{target_dir}/{name}")
 
 
+def ensure_grub_modules(config: Config):
+	"""Install the GRUB module package if the target lacks modinfo.sh."""
+	platform = "x86_64-efi" if config.boot_mode == BOOT_UEFI else "i386-pc"
+	if os.path.isfile(f"{MNT}/usr/lib/grub/{platform}/modinfo.sh"):
+		return
+	packages = utils.boot_packages(config.boot_mode)
+	msg("Installing GRUB modules...")
+	if config.online:
+		_apt(["install", "-y", *packages])
+	else:
+		_install_from_local_repo(packages)
+
+
 def install_bootloader(config: Config):
 	msg(f"Installing bootloader ({config.boot_mode})")
+	ensure_grub_modules(config)
 	if config.boot_mode == BOOT_UEFI:
 		_chroot(["grub-install", "--target=x86_64-efi", "--efi-directory=/boot/efi",
-		         "--bootloader-id=debian", "--recheck"])
+		         "--bootloader-id=debian", "--recheck", f"--modules={GRUB_MODULES}"])
 		if not os.path.isfile(f"{MNT}/boot/efi/EFI/debian/shimx64.efi"):
 			die("Signed shim was not installed to the EFI partition.")
 		if not config.shared_esp():
 			_install_removable_fallback()
 	else:
-		_chroot(["grub-install", "--target=i386-pc", "--recheck", config.disk])
+		_chroot(["grub-install", "--target=i386-pc", "--recheck",
+		         f"--modules={GRUB_MODULES}", config.disk])
 	if config.dual_boot:
 		_write_target("/etc/default/grub", "GRUB_DISABLE_OS_PROBER=false\n", append=True)
 	msg("Updating GRUB configuration")
@@ -1032,7 +1047,6 @@ def cleanup():
 		except OSError:
 			pass
 	_unmount(MNT, lazy=True, recursive=True)
-	_remove(SWAP_KEY_LIVE)
 	ok("Done")
 
 

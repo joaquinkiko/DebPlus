@@ -25,7 +25,7 @@ FILESYSTEM_CHOICES = [
 FIX_LABELS = {"network": "Fix network", "disk": "Choose another disk",
               "clock": "Turn on time sync"}
 FORMAT_DEFAULT = {"root": True, "home": True, "swap": True,
-                  "esp": True, "bios_grub": False}
+                  "esp": True, "boot": True, "bios_grub": False}
 LOCALE_RESULT_LIMIT = 40
 DEFAULT_ROOT_GIB = 30
 RESERVED_USERNAMES = {"root", "daemon", "bin", "sys", "sync", "games", "man", "lp",
@@ -461,9 +461,11 @@ def _choose_disk(app, device):
 	partition_mode(app)
 
 
-def _manual_roles(boot_mode):
+def _manual_roles(boot_mode, luks):
 	roles = [("root", "Root (/)"), ("home", "Home (/home), optional"),
 	         ("swap", "Swap, optional")]
+	if luks:
+		roles.insert(0, ("boot", "Boot (/boot), unencrypted ext4"))
 	if boot_mode == "uefi":
 		roles.insert(1, ("esp", "EFI system partition"))
 	else:
@@ -636,6 +638,10 @@ def _finish_manual(app):
 	if home and not home["format"] and filesystems.get(home["device"], "unformatted") == "unformatted":
 		partition_layout(app, "Home has no filesystem. Tick Format for it.")
 		return
+	boot = config.layout.get("boot")
+	if boot and not boot["format"] and filesystems.get(boot["device"]) != "ext4":
+		partition_layout(app, "Boot must be ext4. Tick Format for it.")
+		return
 	if (config.boot_mode == "bios" and "bios_grub" not in config.layout
 	        and utils.partition_table_type(config.disk) == "gpt"):
 		partition_layout(app, "This disk uses GPT, so it needs a BIOS boot partition.")
@@ -648,7 +654,7 @@ def partition_layout(app, error=""):
 	_reset_mode(config, manual=True)
 	partitions = utils.partition_rows(config.disk)
 	items = []
-	for role, label in _manual_roles(config.boot_mode):
+	for role, label in _manual_roles(config.boot_mode, config.luks):
 		selected = config.layout.get(role)
 		items.append(urwid.Text(("bold", f"  {label}")))
 		for device, size, filesystem in partitions:
@@ -656,7 +662,7 @@ def partition_layout(app, error=""):
 			items.append(_action(f"  {marker} {device:<16}{size:<9}{filesystem}",
 			                     lambda _, r=role, d=device: _assign(app, r, d)))
 		items.append(_action("    None", lambda _, r=role: _assign(app, r, None)))
-		if role in ("home", "esp") and selected:
+		if role in ("home", "esp", "boot") and selected:
 			items.append(urwid.CheckBox(
 				"    Format (erases this partition)", state=selected["format"],
 				on_state_change=_on_format, user_data=(app, role)))
@@ -687,6 +693,7 @@ def _on_luks(_box, state, app):
 		luks_passphrase(app)
 	else:
 		app.config.luks_pass = ""
+		app.config.layout.pop("boot", None)
 
 
 def filesystem(app):
@@ -730,6 +737,7 @@ def luks_passphrase(app):
 	def cancel(_=None):
 		app.config.luks = False
 		app.config.luks_pass = ""
+		app.config.layout.pop("boot", None)
 		app.show_main()
 
 	items = [

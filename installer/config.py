@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
-from .utils import (ESP_RESERVE_GIB, MIN_DISK_GIB, MIN_HOME_GIB, MIRROR, boot_reserve_mib,
-                    dkms_packages, firewall_default_ids)
+from .utils import (BOOT_PARTITION_GIB, ESP_RESERVE_GIB, MIN_DISK_GIB, MIN_HOME_GIB, MIRROR,
+                    boot_reserve_mib, dkms_packages, firewall_default_ids)
 
 # Fields that must be set before Install unlocks. Everything else is optional.
 REQUIRED_FIELDS = (
@@ -87,6 +87,8 @@ class Config:
 		if not self.manual:
 			return True
 		needed = {"root"} | ({"esp"} if self.boot_mode == "uefi" else set())
+		if self.luks:
+			needed.add("boot")
 		return needed <= set(self.layout)
 
 	def erase_text(self) -> str:
@@ -98,7 +100,8 @@ class Config:
 
 	def custom_layout(self, space_mib: int, swap_gib: int, root_gib: int, home_gib: int) -> dict:
 		"""Sizes the custom fields resolve to, in GiB. Root and home come back as the fixed value or the auto fill."""
-		free_gib = (space_mib - (swap_gib + root_gib + home_gib) * 1024) // 1024
+		boot_gib = BOOT_PARTITION_GIB if self.luks else 0
+		free_gib = (space_mib - (swap_gib + root_gib + home_gib + boot_gib) * 1024) // 1024
 		root_auto = root_gib == 0
 		home_exists = bool(root_gib or home_gib)
 		home_auto = home_exists and home_gib == 0
@@ -165,4 +168,5 @@ class Config:
 	def swap_gib(self, ram_gib: int, disk_gib: int) -> int:
 		"""Swap equal to RAM, limited so root keeps its minimum. 0 means no room."""
 		reserve = MIN_DISK_GIB + (ESP_RESERVE_GIB if self.boot_mode == "uefi" else 0)
+		reserve += BOOT_PARTITION_GIB if self.luks else 0
 		return max(0, min(ram_gib, disk_gib - reserve))

@@ -330,6 +330,13 @@ build_local_repo() {
 	msg "Repo holds $(ls "$REPO_DIR"/*.deb | wc -l) packages"
 }
 
+verify_repo() {
+	local package_name
+	while read -r package_name; do
+		grep -qx "Package: $package_name" "$REPO_DIR/Packages" || die "repo is missing $package_name"
+	done < <({ boot_set uefi; boot_set bios; } | tr ' ' '\n' | sed '/^$/d')
+}
+
 # ── Boot files and ISO ─────────────────────────────────────────────────
 
 copy_boot_files() {
@@ -461,6 +468,7 @@ main() {
 	build_live_rootfs
 	build_base_image
 	build_local_repo
+	verify_repo
 
 	msg "Creating base system and live squashfs in parallel (this takes a while)..."
 	make_squashfs "$TARGET_DIR" "$ISO_DIR/install/target.squashfs" 19 &
