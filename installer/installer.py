@@ -721,7 +721,7 @@ def install_packages(config: Config):
 		_apt(["install", "-y", "-t", BACKPORTS, "linux-image-amd64", "linux-headers-amd64"])
 	if config.backports_mesa:
 		msg("Installing backports Mesa (apt)")
-		_apt(["install", "-y", "-t", BACKPORTS, *utils.mesa_packages()])
+		_apt(["install", "-y", "-t", BACKPORTS, *utils.mesa_packages(config.multiarch_i386)])
 	_chroot(["apt-get", "clean"])
 
 

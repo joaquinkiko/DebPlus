@@ -317,9 +317,12 @@ def header_packages():
 	return read_lines(HEADERS_PATH)
 
 
-def mesa_packages():
-	"""Mesa packages installed from trixie-backports."""
-	return read_lines(MESA_PATH)
+def mesa_packages(multiarch):
+	"""Mesa packages installed from trixie-backports, with 32-bit variants when multiarch is on."""
+	packages = read_lines(MESA_PATH)
+	if multiarch:
+		packages += tuple(f"{package}:i386" for package in packages)
+	return packages
 
 
 def target_image():
