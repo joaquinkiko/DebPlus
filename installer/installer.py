@@ -966,11 +966,12 @@ def configure_plymouth(config: Config):
 def write_grub_defaults(config: Config):
 	msg("Writing GRUB defaults")
 	splash = " splash" if config.luks else ""
+	hidden = not config.dual_boot
 	lines = [
 		f'GRUB_DISTRIBUTOR="{PROFILE["PROFILE_NAME"]}"',
 		"GRUB_DEFAULT=0",
-		"GRUB_TIMEOUT=3",
-		"GRUB_TIMEOUT_STYLE=menu",
+		f"GRUB_TIMEOUT={0 if hidden else 3}",
+		f"GRUB_TIMEOUT_STYLE={'hidden' if hidden else 'menu'}",
 		"GRUB_GFXMODE=auto",
 		"GRUB_GFXPAYLOAD_LINUX=keep",
 		f'GRUB_CMDLINE_LINUX_DEFAULT="quiet{splash}"',
