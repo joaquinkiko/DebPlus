@@ -748,7 +748,7 @@ def install_base(config: Config):
 
 def configure_encryption(config: Config):
 	msg("Configuring encryption...")
-	line = f"{LUKS_ROOT} UUID={_blkid(config.layout['root']['device'], 'UUID')} none luks"
+	line = f"{LUKS_ROOT} UUID={_blkid(config.layout['root']['device'], 'UUID')} none luks,tries=5"
 	_write_target("/etc/crypttab", line + "\n")
 	ok("Encryption configured")
 	
@@ -954,6 +954,33 @@ def ensure_grub_modules(config: Config):
 		_install_from_local_repo(packages)
 
 
+def configure_plymouth(config: Config):
+	if not config.luks:
+		return
+	msg("Setting boot splash theme")
+	theme = "bgrt" if config.boot_mode == BOOT_UEFI else "spinner"
+	_chroot(["plymouth-set-default-theme", "-R", theme])
+	ok("Boot splash configured")
+
+
+def write_grub_defaults(config: Config):
+	msg("Writing GRUB defaults")
+	splash = " splash" if config.luks else ""
+	lines = [
+		f'GRUB_DISTRIBUTOR="{PROFILE["PROFILE_NAME"]}"',
+		"GRUB_DEFAULT=0",
+		"GRUB_TIMEOUT=3",
+		"GRUB_TIMEOUT_STYLE=menu",
+		"GRUB_GFXMODE=auto",
+		"GRUB_GFXPAYLOAD_LINUX=keep",
+		f'GRUB_CMDLINE_LINUX_DEFAULT="quiet{splash}"',
+		'GRUB_CMDLINE_LINUX=""',
+	]
+	if config.dual_boot:
+		lines.append("GRUB_DISABLE_OS_PROBER=false")
+	_write_target("/etc/default/grub", "\n".join(lines) + "\n")
+
+
 def install_bootloader(config: Config):
 	msg(f"Installing bootloader ({config.boot_mode})")
 	ensure_grub_modules(config)
@@ -967,8 +994,7 @@ def install_bootloader(config: Config):
 	else:
 		_chroot(["grub-install", "--target=i386-pc", "--recheck",
 		         f"--modules={GRUB_MODULES}", config.disk])
-	if config.dual_boot:
-		_write_target("/etc/default/grub", "GRUB_DISABLE_OS_PROBER=false\n", append=True)
+	write_grub_defaults(config)
 	msg("Updating GRUB configuration")
 	_chroot(["update-grub"])
 	ok("Bootloader installed")
@@ -1157,6 +1183,7 @@ def run_install(config: Config):
 		("Firewall", lambda: configure_firewall(config)),
 		("Git", lambda: configure_git(config)),
 		("Secure Boot", lambda: configure_secure_boot(config)),
+		("Boot splash", lambda: configure_plymouth(config)),
 		("Bootloader", lambda: install_bootloader(config)),
 		("Snapshots", lambda: configure_snapper(config)),
 	]

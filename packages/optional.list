@@ -1,6 +1,8 @@
 # package|config flag. Installed when that flag is on. Shipped in the ISO's local repo.
 cryptsetup|luks
 cryptsetup-initramfs|luks
+plymouth|luks
+plymouth-themes|luks
 snapper|snapper
 unattended-upgrades|auto_updates
 systemd-zram-generator|zram
