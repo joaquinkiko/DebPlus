@@ -6,6 +6,8 @@ set $smod Shift
 set $menu wofi --show drun
 set $lock swaylock -f -c 000000
 
+include /etc/sway/theme
+
 set $ws1  " 1 "
 set $ws2  " 2 "
 set $ws3  " 3 "

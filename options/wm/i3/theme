@@ -1,0 +1,38 @@
+# DebPlus dark theme for i3. Included from /etc/i3/config.
+set $base #1e1e2e
+set $mantle #181825
+set $crust #11111b
+set $surface #313244
+set $overlay #45475a
+set $text #cdd6f4
+set $subtext #a6adc8
+set $accent #89b4fa
+set $red #f38ba8
+set $yellow #f9e2af
+
+default_border pixel 2
+default_floating_border pixel 2
+gaps inner 8
+
+client.focused           $accent  $accent  $crust   $accent  $accent
+client.focused_inactive  $surface $surface $text    $surface $surface
+client.unfocused         $mantle  $mantle  $subtext $mantle  $mantle
+client.urgent            $red     $red     $crust   $red     $red
+client.placeholder       $crust   $crust   $text    $crust   $crust
+client.background        $base
+
+bar {
+	status_command i3status
+	tray_output primary
+	position bottom
+	colors {
+		background         $mantle
+		statusline         $text
+		separator          $overlay
+		focused_workspace  $accent  $accent  $crust
+		active_workspace   $surface $surface $text
+		inactive_workspace $mantle  $mantle  $subtext
+		urgent_workspace   $red     $red     $crust
+		binding_mode       $yellow  $yellow  $crust
+	}
+}

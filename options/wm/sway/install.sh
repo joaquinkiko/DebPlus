@@ -12,7 +12,7 @@ apt-get install -y --no-install-recommends \
 	sway swaybg swayidle swaylock xwayland waybar wofi kitty mako-notifier grim slurp \
 	xdg-desktop-portal-wlr xdg-desktop-portal-gtk autotiling \
 	libpam-systemd policykit-1 lxpolkit \
-	lightdm lightdm-gtk-greeter \
+	lightdm lightdm-gtk-greeter firefox-esr \
 	network-manager-gnome \
 	pipewire pipewire-pulse wireplumber pavucontrol brightnessctl playerctl \
 	mousepad mpv nemo synaptic lxtask \
@@ -23,9 +23,14 @@ install -Dm644 "$SCRIPT_DIRECTORY/sway.png" /usr/share/backgrounds/wallpaper.png
 install -Dm644 "$SCRIPT_DIRECTORY/waybar.jsonc" /etc/xdg/waybar/config.jsonc
 install -Dm644 "$SCRIPT_DIRECTORY/mimeapps.list" /etc/xdg/mimeapps.list
 install -Dm644 "$SCRIPT_DIRECTORY/user-dirs.defaults" /etc/xdg/user-dirs.defaults
+install -Dm644 "$SCRIPT_DIRECTORY/gtk-settings.ini" /etc/xdg/gtk-3.0/settings.ini
+install -Dm644 "$SCRIPT_DIRECTORY/gtk-settings.ini" /etc/xdg/gtk-4.0/settings.ini
+install -Dm644 "$SCRIPT_DIRECTORY/theme" /etc/sway/theme
+install -Dm644 "$SCRIPT_DIRECTORY/waybar-style.css" /etc/xdg/waybar/style.css
 
 update-alternatives --install /usr/bin/x-terminal-emulator x-terminal-emulator /usr/bin/kitty 50
 update-alternatives --set x-terminal-emulator /usr/bin/kitty
+update-alternatives --set x-www-browser /usr/bin/firefox-esr
 
 systemctl enable lightdm.service
 runuser -u "$USER_NAME" -- xdg-user-dirs-update

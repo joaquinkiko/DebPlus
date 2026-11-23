@@ -26,10 +26,7 @@ exec --no-startup-id lxpolkit
 exec --no-startup-id xss-lock --transfer-sleep-lock -- i3lock -n -c 000000
 exec --no-startup-id xdg-user-dirs-update
 
-bar {
-	status_command i3status
-	tray_output primary
-}
+include /etc/i3/theme
 
 ### Appearance
 font pango:monospace 12

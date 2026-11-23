@@ -1,0 +1,39 @@
+# DebPlus dark panel for tint2. Background 1 is the panel, 2 is idle task, 3 is active task.
+panel_monitor = all
+panel_position = bottom center horizontal
+panel_size = 100% 40
+panel_items = TSC
+panel_background_id = 1
+panel_padding = 8 4 8
+font = Sans 10
+taskbar_mode = single_desktop
+task_icon = 1
+task_text = 1
+task_maximum_size = 180 35
+task_padding = 6 4
+task_background_id = 2
+task_active_background_id = 3
+task_font_color = #a6adc8 100
+task_active_font_color = #1e1e2e 100
+systray_padding = 4 4 4
+systray_background_id = 0
+systray_icon_size = 22
+time1_format = %H:%M
+clock_font_color = #cdd6f4 100
+clock_background_id = 0
+clock_padding = 8 0
+
+rounded = 0
+border_width = 0
+background_color = #1e1e2e 92
+border_color = #1e1e2e 0
+
+rounded = 6
+border_width = 0
+background_color = #313244 0
+border_color = #313244 0
+
+rounded = 6
+border_width = 0
+background_color = #89b4fa 100
+border_color = #89b4fa 100

@@ -10,7 +10,7 @@ echo "shared/default-x-display-manager select lightdm" | debconf-set-selections
 
 apt-get install -y --no-install-recommends \
 	xserver-xorg i3-wm i3status i3lock xss-lock rofi dunst picom alacritty feh maim \
-	lightdm lightdm-gtk-greeter \
+	lightdm lightdm-gtk-greeter firefox-esr \
 	network-manager-gnome lxpolkit policykit-1 \
 	pipewire pipewire-pulse wireplumber pavucontrol brightnessctl playerctl \
 	mousepad mpv nemo synaptic lxtask \
@@ -20,9 +20,13 @@ install -Dm644 "$SCRIPT_DIRECTORY/config" /etc/i3/config
 install -Dm644 "$SCRIPT_DIRECTORY/i3.png" /usr/share/backgrounds/wallpaper.png
 install -Dm644 "$SCRIPT_DIRECTORY/mimeapps.list" /etc/xdg/mimeapps.list
 install -Dm644 "$SCRIPT_DIRECTORY/user-dirs.defaults" /etc/xdg/user-dirs.defaults
+install -Dm644 "$SCRIPT_DIRECTORY/gtk-settings.ini" /etc/xdg/gtk-3.0/settings.ini
+install -Dm644 "$SCRIPT_DIRECTORY/gtk-settings.ini" /etc/xdg/gtk-4.0/settings.ini
+install -Dm644 "$SCRIPT_DIRECTORY/theme" /etc/i3/theme
 
 update-alternatives --install /usr/bin/x-terminal-emulator x-terminal-emulator /usr/bin/alacritty 50
 update-alternatives --set x-terminal-emulator /usr/bin/alacritty
+update-alternatives --set x-www-browser /usr/bin/firefox-esr
 
 systemctl enable lightdm.service
 runuser -u "$USER_NAME" -- xdg-user-dirs-update

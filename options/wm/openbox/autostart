@@ -4,6 +4,6 @@ picom -b &
 dunst &
 nm-applet &
 lxpolkit &
-tint2 &
+tint2 -c /etc/xdg/tint2/tint2rc &
 xss-lock --transfer-sleep-lock -- i3lock -n -c 000000 &
 xdg-user-dirs-update &

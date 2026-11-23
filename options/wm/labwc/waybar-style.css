@@ -1,0 +1,52 @@
+* {
+	font-family: "Sans";
+	font-size: 13px;
+	min-height: 0;
+}
+
+window#waybar {
+	background: rgba(24, 24, 37, 0.92);
+	color: #cdd6f4;
+}
+
+#workspaces button {
+	padding: 0 8px;
+	color: #a6adc8;
+	background: transparent;
+	border-radius: 8px;
+}
+
+#workspaces button.active,
+#workspaces button.focused {
+	color: #1e1e2e;
+	background: #89b4fa;
+}
+
+#workspaces button.urgent {
+	color: #1e1e2e;
+	background: #f38ba8;
+}
+
+#window,
+#clock,
+#network,
+#pulseaudio,
+#tray,
+#mode {
+	padding: 0 10px;
+	margin: 4px 2px;
+}
+
+#mode {
+	color: #f9e2af;
+}
+
+#taskbar button {
+	border-radius: 8px;
+	padding: 0 8px;
+	margin: 4px 2px;
+}
+
+#taskbar button.active {
+	background: #313244;
+}

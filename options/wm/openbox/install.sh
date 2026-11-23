@@ -21,6 +21,10 @@ install -Dm644 "$SCRIPT_DIRECTORY/autostart" /etc/xdg/openbox/autostart
 install -Dm644 "$SCRIPT_DIRECTORY/openbox.png" /usr/share/backgrounds/wallpaper.png
 install -Dm644 "$SCRIPT_DIRECTORY/mimeapps.list" /etc/xdg/mimeapps.list
 install -Dm644 "$SCRIPT_DIRECTORY/user-dirs.defaults" /etc/xdg/user-dirs.defaults
+install -Dm644 "$SCRIPT_DIRECTORY/gtk-settings.ini" /etc/xdg/gtk-3.0/settings.ini
+install -Dm644 "$SCRIPT_DIRECTORY/gtk-settings.ini" /etc/xdg/gtk-4.0/settings.ini
+install -Dm644 "$SCRIPT_DIRECTORY/openbox-themerc" /usr/share/themes/DebPlusDark/openbox-3/themerc
+install -Dm644 "$SCRIPT_DIRECTORY/tint2rc" /etc/xdg/tint2/tint2rc
 
 update-alternatives --install /usr/bin/x-terminal-emulator x-terminal-emulator /usr/bin/alacritty 50
 update-alternatives --set x-terminal-emulator /usr/bin/alacritty

@@ -41,6 +41,10 @@ install -Dm644 "$SCRIPT_DIRECTORY/hyprland.png" /usr/share/backgrounds/wallpaper
 install -Dm644 "$SCRIPT_DIRECTORY/waybar.jsonc" /etc/xdg/waybar/config.jsonc
 install -Dm644 "$SCRIPT_DIRECTORY/mimeapps.list" /etc/xdg/mimeapps.list
 install -Dm644 "$SCRIPT_DIRECTORY/user-dirs.defaults" /etc/xdg/user-dirs.defaults
+install -Dm644 "$SCRIPT_DIRECTORY/gtk-settings.ini" /etc/xdg/gtk-3.0/settings.ini
+install -Dm644 "$SCRIPT_DIRECTORY/gtk-settings.ini" /etc/xdg/gtk-4.0/settings.ini
+install -Dm644 "$SCRIPT_DIRECTORY/theme.lua" /etc/xdg/hypr/theme.lua
+install -Dm644 "$SCRIPT_DIRECTORY/waybar-style.css" /etc/xdg/waybar/style.css
 
 install -d -o "$USER_NAME" -g "$USER_NAME" "$USER_HOME/.config" "$USER_HOME/.config/hypr"
 install -Dm644 -o "$USER_NAME" -g "$USER_NAME" "$SCRIPT_DIRECTORY/hyprland.lua" "$USER_HOME/.config/hypr/hyprland.lua"

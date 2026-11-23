@@ -1,0 +1,23 @@
+# DebPlus dark theme for Openbox. Installed as DebPlusDark.
+border.width: 2
+padding.width: 4
+padding.height: 4
+
+window.active.border.color: #89b4fa
+window.inactive.border.color: #313244
+
+window.active.title.bg: Flat Solid
+window.active.title.bg.color: #313244
+window.inactive.title.bg: Flat Solid
+window.inactive.title.bg.color: #1e1e2e
+window.active.label.text.color: #cdd6f4
+window.inactive.label.text.color: #a6adc8
+
+menu.items.bg: Flat Solid
+menu.items.bg.color: #1e1e2e
+menu.items.text.color: #cdd6f4
+menu.items.active.bg: Flat Solid
+menu.items.active.bg.color: #89b4fa
+menu.items.active.text.color: #1e1e2e
+menu.border.color: #313244
+menu.border.width: 1
