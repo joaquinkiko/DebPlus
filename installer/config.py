@@ -1,6 +1,7 @@
+import math
 from dataclasses import dataclass, field
 
-from .utils import (BOOT_PARTITION_GIB, ESP_RESERVE_GIB, MIN_DISK_GIB, MIN_HOME_GIB, MIRROR,
+from .utils import (BOOT_PARTITION_GIB, ESP_RESERVE_GIB, MIN_DISK_GIB, MIN_HOME_GIB, MIRROR, disk_bytes,
                     boot_reserve_mib, dkms_packages, firewall_default_ids)
 
 # Fields that must be set before Install unlocks. Everything else is optional.
@@ -58,7 +59,7 @@ class Config:
 	online: bool = True  # False when there is no internet. Set through set_online()
 	layout: dict = field(default_factory=dict)  # role -> {"device", "format"}
 	zram: bool = True  # compressed swap in RAM, from systemd-zram-generator
-	swap_partition: bool = True  # automatic mode only; manual uses the layout
+	swap_size: str = "normal"  # "normal" or "small", automatic mode only
 	swappiness: int = 60
 	secure_boot: bool = False  # set at startup from mokutil
 	mok_pass: str = field(default="", repr=False)  # one-time MOK enrollment password
@@ -83,7 +84,7 @@ class Config:
 			return "swap" in self.layout
 		if self.custom:
 			return self.custom_swap_gib > 0
-		return self.swap_partition
+		return True
 
 	def layout_ready(self) -> bool:
 		if not self.manual:
@@ -173,8 +174,22 @@ class Config:
 	def desktop_label(self) -> str:
 		return self.custom_repo if self.desktop == "custom" else self.desktop
 
-	def swap_gib(self, ram_gib: int, disk_gib: int) -> int:
-		"""Swap equal to RAM, limited so root keeps its minimum. 0 means no room."""
+	def auto_swap_gib(self, ram_gib: int, size: str) -> int:
+		"""Small is sqrt(RAM), normal is RAM plus sqrt(RAM). Both at least 2 GB."""
+		root_part = max(math.ceil(math.sqrt(ram_gib)), 2)
+		return root_part if size == "small" else ram_gib + root_part
+
+	def auto_min_disk_gib(self, ram_gib: int, size: str) -> int:
+		"""Smallest disk that fits automatic swap of this size, with root and boot reserves."""
 		reserve = MIN_DISK_GIB + (ESP_RESERVE_GIB if self.boot_mode == "uefi" else 0)
 		reserve += BOOT_PARTITION_GIB if self.luks else 0
-		return max(0, min(ram_gib, disk_gib - reserve))
+		return reserve + self.auto_swap_gib(ram_gib, size)
+
+	def swap_gib_planned(self, ram_gib: int) -> int:
+		"""Swap size this install will create, in GB. Manual reads the chosen partition."""
+		if self.manual:
+			part = self.layout.get("swap")
+			return disk_bytes(part["device"]) // 2**30 if part else 0
+		if self.custom:
+			return self.custom_swap_gib
+		return self.auto_swap_gib(ram_gib, self.swap_size)

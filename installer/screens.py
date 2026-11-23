@@ -2,6 +2,7 @@
 # Modifications Copyright (C) 2026 JoaquinKiko
 # SPDX-License-Identifier: GPL-2.0-only. See COPYING and NOTICE.
 
+import math
 import os
 import re
 import subprocess
@@ -473,18 +474,34 @@ def _manual_roles(boot_mode, luks):
 	return roles
 
 
-def _set_automatic(app, swap_partition):
+def _set_automatic(app, size):
 	_reset_mode(app.config)
-	app.config.swap_partition = swap_partition
+	app.config.swap_size = size
 	app.show_main()
+
+
+def _automatic_rows(app):
+	config = app.config
+	ram_gib = math.ceil(utils.ram_mib() / 1024)
+	disk_gib = utils.disk_bytes(config.disk) // 2**30
+	rows = []
+	for size, title in (("normal", "Automatic"), ("small", "Automatic (small swap)")):
+		swap_gib = config.auto_swap_gib(ram_gib, size)
+		hibernate = "Hibernation supported." if swap_gib >= ram_gib else "No hibernation."
+		description = f"Erase the whole disk. {swap_gib} GB swap. {hibernate}"
+		needed = config.auto_min_disk_gib(ram_gib, size)
+		if disk_gib < needed:
+			rows += _described(urwid.Text(("unset", f"  {title}  needs {needed} GB disk")),
+			                   description, style="unset")
+		else:
+			rows += _described(
+				_action(("bold", f"  {title}"), lambda _, s=size: _set_automatic(app, s)),
+				description)
+	return rows
 
 
 def partition_mode(app):
 	modes = [
-		("Automatic", "Erase the whole disk. Creates swap equal to RAM if available disk space.",
-		 lambda: _set_automatic(app, True)),
-		("Automatic without swap", "Erase the whole disk. No swap partition is created.",
-		 lambda: _set_automatic(app, False)),
 		("Custom sizes", "Erase the whole disk. Set swap and an optional separate root. Home takes the rest.",
 		 lambda: custom_sizes(app)),
 		("Free space (dual boot)", "Install into unallocated space. Existing partitions are kept.",
@@ -492,7 +509,7 @@ def partition_mode(app):
 		("Manual", "Use existing partitions. Only the ones you pick are formatted.",
 		 lambda: partition_layout(app)),
 	]
-	items = []
+	items = _automatic_rows(app)
 	for title, description, callback in modes:
 		items += _described(_action(("bold", f"  {title}"), lambda _, cb=callback: cb()), description)
 	_open(app, "Partitioning", items + [_back_button(app)])
@@ -533,6 +550,7 @@ def custom_sizes(app, free_space=False):
 		disk_mib = utils.disk_bytes(config.disk) // 2**20
 		space_mib = disk_mib - boot_mib
 		heading = f"  Total disk size: {disk_mib // 1024} GB"
+	ram_gib = math.ceil(utils.ram_mib() / 1024)
 	swap_edit = SubmitEdit("  Swap (GB, leave blank to not set): ", str(config.custom_swap_gib or ""))
 	root_edit = SubmitEdit("  Root (GB, leave blank to not set): ", str(config.custom_root_gib or ""))
 	home_edit = SubmitEdit("  Home (GB, leave blank to fill the rest): ", str(config.custom_home_gib or ""))
@@ -556,6 +574,8 @@ def custom_sizes(app, free_space=False):
 			lines.append(f"Home: {max(shown['home'], 0)} GB")
 		if shown["unused"]:
 			lines.append(f"Left unformatted: {shown['unused']} GB")
+		if swap_gib < ram_gib:
+			lines.append(f"Hibernation needs swap of {ram_gib} GB or more")
 		if shown["free"] < 0:
 			lines.append(f"Over the space by {-shown['free']} GB. Reduce a size.")
 		summary.set_text(("warning" if shown["free"] < 0 else "label",
@@ -667,6 +687,9 @@ def partition_layout(app, error=""):
 				"    Format (erases this partition)", state=selected["format"],
 				on_state_change=_on_format, user_data=(app, role)))
 		items.append(urwid.Divider())
+	ram_gib = math.ceil(utils.ram_mib() / 1024)
+	if "swap" in config.layout and config.swap_gib_planned(ram_gib) < ram_gib:
+		items.append(urwid.Text(("warning", f"  Swap is under {ram_gib} GB RAM. No hibernation.")))
 	items += [
 		urwid.Text(("error", f"  {error}" if error else "")),
 		_action(("bold", "  Done"), lambda _: _finish_manual(app)),
@@ -767,7 +790,7 @@ def luks_passphrase(app):
 
 	items = [
 		urwid.Text(("warning", "  Losing this passphrase means losing the data. There is no recovery.")),
-		urwid.Text(("label", "  You type it at every boot, using the keyboard layout you chose.")),
+		urwid.Text(("label", "  Typed at boot twice: once for root, once for swap.")),
 	]
 	if (app.config.custom and (app.config.custom_root_gib or app.config.custom_home_gib)) or (
 			app.config.manual and "home" in app.config.layout):
@@ -1221,7 +1244,7 @@ def advanced(app):
 	config = app.config
 	items = [
 		*_flag_rows(app, "zram", "  zram (compressed swap in RAM)",
-		            "Recommended. Used before any swap partition. Doesn't support hibernation."),
+		            "Recommended. Used before any swap partition."),
 		*_flag_rows(app, "auto_updates", "  Automatic security updates",
 		            "Installs security fixes daily. Never reboots on its own."),
 		*_described(urwid.CheckBox("  32-bit (i386) support", state=config.multiarch_i386,
@@ -1271,6 +1294,10 @@ def summary(app):
 	if not config.ready():
 		app.show_main()
 		return
+	ram_gib = math.ceil(utils.ram_mib() / 1024)
+	swap_gib = config.swap_gib_planned(ram_gib)
+	swap_text = (f"{swap_gib} GB" + (", LUKS" if config.luks else "")
+	             if config.has_swap_partition() else "no")
 	rows = [
 		("Boot mode",      config.boot_mode.upper()),
 		("Install mode",   "online" if config.online else "offline (console only)"),
@@ -1282,7 +1309,9 @@ def summary(app):
 		("Hostname",       config.hostname),
 		("User",           config.username),
 		("Root login",     "yes" if config.root_pass else "disabled"),
-		("Swap partition", "yes" if config.has_swap_partition() else "no"),
+		("Swap",           swap_text),
+		("Hibernation",    "supported" if swap_gib >= ram_gib
+		                   else f"not supported, swap under {ram_gib} GB RAM"),
 		("zram",           "yes" if config.zram else "no"),
 		("Encryption",     "LUKS2" if config.luks else "no"),
 		("Snapshots",      config.snapshot_label()),

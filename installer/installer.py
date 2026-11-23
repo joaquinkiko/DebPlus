@@ -356,10 +356,8 @@ def _apply_partitions(config: Config, roles, parted_args):
 
 def _partition_auto(config: Config):
 	disk_mib = utils.disk_bytes(config.disk) // 2**20
-	disk_gib = disk_mib // 1024
 	ram_gib = math.ceil(utils.ram_mib() / 1024)
-	swap_gib = config.swap_gib(ram_gib, disk_gib) if config.has_swap_partition() else 0
-	swap_start = f"{disk_mib - swap_gib * 1024}MiB"
+	swap_start = f"{disk_mib - config.auto_swap_gib(ram_gib, config.swap_size) * 1024}MiB"
 	boot_roles, boot_args, boot_end_mib = _boot_partition(config.boot_mode == BOOT_UEFI)
 
 	roles = [*boot_roles]
@@ -370,11 +368,10 @@ def _partition_auto(config: Config):
 		roles.append("boot")
 		boot_end_mib = split_mib
 	parted_args += ["mkpart", "root", PARTED_FS_HINT[config.filesystem],
-	                f"{boot_end_mib}MiB", swap_start if swap_gib else "100%"]
+	                f"{boot_end_mib}MiB", swap_start]
 	roles.append("root")
-	if swap_gib:
-		roles.append("swap")
-		parted_args += ["mkpart", "swap", "linux-swap", swap_start, "100%"]
+	roles.append("swap")
+	parted_args += ["mkpart", "swap", "linux-swap", swap_start, "100%"]
 	_apply_partitions(config, roles, parted_args)
 
 
@@ -466,7 +463,7 @@ def _format_layout(config: Config):
 			_run(["mkfs.fat", "-F32", device])
 		elif role == "boot":
 			_run(["mkfs.ext4", "-qF", device])
-		elif role == "swap" and not config.luks:
+		elif role == "swap":
 			_run(["mkswap", device])
 		elif role in ("root", "home"):
 			_make_filesystem(device, config.filesystem)
@@ -532,15 +529,19 @@ def _cryptsetup(args, passphrase=None):
 
 def _close_mappers():
 	"""Release LUKS mappers left open by an earlier attempt."""
-	_try(["cryptsetup", "close", LUKS_ROOT])
+	for mapper in (LUKS_ROOT, LUKS_SWAP):
+		_try(["cryptsetup", "close", mapper])
 
 
 def _encrypt_layout(config: Config):
-	root = config.layout["root"]["device"]
-	msg(f"Encrypting root ({root})")
-	_cryptsetup(["luksFormat", "--type", "luks2", "--pbkdf", "pbkdf2",
-	             "--batch-mode", "--key-file=-", root], config.luks_pass)
-	_cryptsetup(["open", "--key-file=-", root, LUKS_ROOT], config.luks_pass)
+	for role, mapper in (("root", LUKS_ROOT), ("swap", LUKS_SWAP)):
+		if role not in config.layout:
+			continue
+		device = config.layout[role]["device"]
+		msg(f"Encrypting {role} ({device})")
+		_cryptsetup(["luksFormat", "--type", "luks2", "--pbkdf", "pbkdf2",
+		             "--batch-mode", "--key-file=-", device], config.luks_pass)
+		_cryptsetup(["open", "--key-file=-", device, mapper], config.luks_pass)
 
 
 def partition_disk(config: Config):
@@ -755,10 +756,9 @@ def configure_encryption(config: Config):
 	root_uuid = _blkid(config.layout["root"]["device"], "UUID")
 	lines = [f"{LUKS_ROOT} UUID={root_uuid} none luks,tries=5"]
 	if "swap" in config.layout:
-		# Plain dm-crypt with a random key each boot. PARTUUID because the raw partition has no UUID.
-		swap_partuuid = _blkid(config.layout["swap"]["device"], "PARTUUID")
-		lines.append(f"{LUKS_SWAP} PARTUUID={swap_partuuid} /dev/urandom "
-		             "swap,cipher=aes-xts-plain64,size=512,nofail")
+		# initramfs unlock: resume reads swap before root is mounted
+		swap_uuid = _blkid(config.layout["swap"]["device"], "UUID")
+		lines.append(f"{LUKS_SWAP} UUID={swap_uuid} none luks,tries=5,initramfs")
 	_write_target("/etc/crypttab", "\n".join(lines) + "\n")
 	ok("Encryption configured")
 
@@ -827,6 +827,19 @@ def enable_locale(locale_name):
 		locale_file.write(text)
 
 
+def _swap_uuid(config: Config):
+	"""UUID of the swap filesystem, read from the open mapper when LUKS is on."""
+	return _blkid(_device(config, "swap"), "UUID")
+
+
+def configure_resume(config: Config):
+	if "swap" not in config.layout:
+		return
+	os.makedirs(f"{MNT}/etc/initramfs-tools/conf.d", exist_ok=True)
+	_write_target("/etc/initramfs-tools/conf.d/resume", f"RESUME=UUID={_swap_uuid(config)}\n")
+	ok("Hibernation resume target set")
+
+
 def configure_system(config: Config):
 	msg("Writing system configuration")
 	write_fstab(config)
@@ -854,6 +867,7 @@ def configure_system(config: Config):
 
 	if config.luks:
 		configure_encryption(config)
+	configure_resume(config)
 	if config.auto_updates:
 		configure_auto_updates()
 
@@ -1010,6 +1024,7 @@ def configure_plymouth(config: Config):
 def write_grub_defaults(config: Config):
 	msg("Writing GRUB defaults")
 	splash = " splash" if config.luks else ""
+	resume = f" resume=UUID={_swap_uuid(config)}" if "swap" in config.layout else ""
 	hidden = not config.dual_boot
 	lines = [
 		f'GRUB_DISTRIBUTOR="{PROFILE["PROFILE_NAME"]}"',
@@ -1018,7 +1033,7 @@ def write_grub_defaults(config: Config):
 		f"GRUB_TIMEOUT_STYLE={'hidden' if hidden else 'menu'}",
 		"GRUB_GFXMODE=auto",
 		"GRUB_GFXPAYLOAD_LINUX=keep",
-		f'GRUB_CMDLINE_LINUX_DEFAULT="quiet{splash}"',
+		f'GRUB_CMDLINE_LINUX_DEFAULT="quiet{splash}{resume}"',
 		'GRUB_CMDLINE_LINUX=""',
 	]
 	if config.dual_boot:
