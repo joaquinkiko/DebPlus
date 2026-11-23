@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-only. See COPYING and NOTICE.
 
 import glob
+import json
 import math
 import os
 import re
@@ -762,15 +763,50 @@ def configure_encryption(config: Config):
 	ok("Encryption configured")
 
 
-def configure_snapper(config: Config):
-	if not config.snapper:
-		return
-	msg("Configuring snapper")
-	if not os.path.isfile(f"{MNT}/etc/snapper/configs/root"):
-		_chroot(["snapper", "-c", "root", "create-config", "/"])
-	if not os.path.isdir(f"{MNT}/.snapshots/1"):
-		_chroot(["snapper", "-c", "root", "create", "--description", "post-install"])
-	ok("Snapper configured")
+TIMESHIFT_EXCLUDES = ["/home/**", "/var/log/**", "/tmp/**", "/var/cache/apt/archives/**"]
+
+
+def configure_timeshift(config: Config):
+	msg("Configuring Timeshift")
+	settings = {
+		"backup_device_uuid": _blkid(_device(config, "root"), "UUID"),
+		"parent_device_uuid": "",
+		"do_first_run": False,
+		"btrfs_mode": config.timeshift_btrfs,
+		"include_btrfs_home_for_backup": False,
+		"include_btrfs_home_for_restore": False,
+		"stop_cron_emails": True,
+		"schedule_monthly": False,
+		"schedule_weekly": config.timeshift_auto,
+		"schedule_daily": False,
+		"schedule_hourly": False,
+		"schedule_boot": False,
+		"count_daily": 3,
+		"exclude": TIMESHIFT_EXCLUDES,
+		"exclude-apps": [],
+	}
+	os.makedirs(f"{MNT}/etc/timeshift", exist_ok=True)
+	_write_target("/etc/timeshift/timeshift.json", json.dumps(settings, indent="\t") + "\n")
+	if config.timeshift_auto:
+		_write_target("/etc/systemd/system/timeshift-autosnap.service",
+		              "[Unit]\nDescription=Timeshift scheduled snapshot check\n\n"
+		              "[Service]\nType=oneshot\nExecStart=/usr/bin/timeshift --check\n")
+		_write_target("/etc/systemd/system/timeshift-autosnap.timer",
+		              "[Unit]\nDescription=Hourly Timeshift snapshot check\n\n"
+		              "[Timer]\nOnCalendar=hourly\nPersistent=true\n\n"
+		              "[Install]\nWantedBy=timers.target\n")
+		_chroot(["systemctl", "enable", "timeshift-autosnap.timer"])
+	ok("Timeshift configured")
+
+
+def take_first_snapshot() -> bool:
+	msg("Creating first Timeshift snapshot")
+	if _chroot_ok(["timeshift", "--create", "--scripted",
+	               "--comments", "Fresh install", "--tags", "O"]):
+		ok("First Timeshift snapshot created")
+		return True
+	_log("First Timeshift snapshot failed. Run: sudo timeshift --create")
+	return False
 
 
 def configure_auto_updates():
@@ -1178,6 +1214,13 @@ def run_install(config: Config):
 		if not install_window_manager(config):
 			failures.append("Window manager")
 
+	def snapshots_stage():
+		if not config.timeshift:
+			return
+		configure_timeshift(config)
+		if not take_first_snapshot():
+			failures.append("First Timeshift snapshot")
+
 	def extras_stage():
 		failures.extend(install_extras(config))
 		failures.extend(install_custom_software(config))
@@ -1194,7 +1237,7 @@ def run_install(config: Config):
 		("Secure Boot", lambda: configure_secure_boot(config)),
 		("Boot splash", lambda: configure_plymouth(config)),
 		("Bootloader", lambda: install_bootloader(config)),
-		("Snapshots", lambda: configure_snapper(config)),
+		("Snapshots", snapshots_stage),
 	]
 	ui.start(len(stages))
 	try:

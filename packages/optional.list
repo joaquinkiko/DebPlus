@@ -3,7 +3,8 @@ cryptsetup|luks
 cryptsetup-initramfs|luks
 plymouth|luks
 plymouth-themes|luks
-snapper|snapper
+timeshift|timeshift
+rsync|timeshift
 unattended-upgrades|auto_updates
 systemd-zram-generator|zram
 os-prober|dual_boot

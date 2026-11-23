@@ -34,7 +34,9 @@ class Config:
 	backports_mesa: bool = False
 	luks: bool = False
 	luks_pass: str = field(default="", repr=False)
-	snapper: bool = False  # btrfs only
+	timeshift: bool = False  # snapshots with Timeshift, rsync mode
+	timeshift_auto: bool = False  # scheduled daily snapshots
+	timeshift_btrfs: bool = False  # btrfs snapshot mode, btrfs only
 	auto_updates: bool = True  # daily security upgrades via unattended-upgrades
 	mirror: str = MIRROR  # apt base URL, default from profile.env
 	ufw: bool = False  # enable UFW with the rules from firewall.list
@@ -161,6 +163,12 @@ class Config:
 			(self.ufw, "ufw"),
 		)
 		return [label for enabled, label in conditions if enabled]
+
+	def snapshot_label(self) -> str:
+		if not self.timeshift:
+			return "none"
+		label = "timeshift btrfs" if self.timeshift_btrfs else "timeshift rsync"
+		return label + ", auto" if self.timeshift_auto else label
 
 	def desktop_label(self) -> str:
 		return self.custom_repo if self.desktop == "custom" else self.desktop

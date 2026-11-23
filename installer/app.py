@@ -229,7 +229,7 @@ class App:
 			("User",       config.username),
 			("Desktop",    config.desktop_label()),
 			("Encryption", "LUKS2" if config.luks else "none"),
-			("Snapshots",  "snapper" if config.snapper else "none"),
+			("Snapshots",  config.snapshot_label()),
 			("Components", ", ".join(["main"] + config.components)),
 			("Extras",     ", ".join(config.selected_packages())),
 			("Advanced",   ", ".join(config.advanced_labels())),

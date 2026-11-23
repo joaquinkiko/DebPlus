@@ -681,7 +681,7 @@ def partition_layout(app, error=""):
 def _choose_filesystem(app, name):
 	app.config.filesystem = name
 	if name != "btrfs":
-		app.config.snapper = False
+		app.config.timeshift_btrfs = False
 	else:
 		app.config.custom_root_gib = 0  # separate root needs ext4 or xfs
 	filesystem(app)
@@ -696,6 +696,36 @@ def _on_luks(_box, state, app):
 		app.config.layout.pop("boot", None)
 
 
+def _on_timeshift(_box, state, app):
+	config = app.config
+	config.timeshift = state
+	if not state:
+		config.timeshift_auto = False
+		config.timeshift_btrfs = False
+	filesystem(app)
+
+
+def _snapshot_rows(app):
+	config = app.config
+	rows = _described(
+		urwid.CheckBox("  Snapshots with Timeshift", state=config.timeshift,
+		               on_state_change=_on_timeshift, user_data=app),
+		"System restore using incremental snapshots.", divider=False)
+	if not config.timeshift:
+		return rows
+	rows += _described(
+		urwid.CheckBox("    Automatic snapshots", state=config.timeshift_auto,
+		               on_state_change=_on_flag, user_data=(app, "timeshift_auto")),
+		"Weekly, keeping the last 3 backups.", divider=False)
+	if config.filesystem == "btrfs":
+		rows += _described(
+			urwid.CheckBox("    BTRFS mode (instead of rsync)",
+			               state=config.timeshift_btrfs,
+			               on_state_change=_on_flag, user_data=(app, "timeshift_btrfs")),
+			"Near-instant snapshots of the root subvolume.", divider=False)
+	return rows
+
+
 def filesystem(app):
 	config = app.config
 	items = []
@@ -705,12 +735,7 @@ def filesystem(app):
 		                            lambda _, v=name: _choose_filesystem(app, v)),
 		                    description, divider=False)
 	items.append(urwid.Divider())
-	if config.filesystem == "btrfs":
-		items.append(urwid.CheckBox("  Snapshots with snapper", state=config.snapper,
-		                            on_state_change=_on_flag, user_data=(app, "snapper")))
-	else:
-		items.append(urwid.Text(("unset", "  Snapshots with snapper  (needs btrfs)")))
-	items.append(urwid.Text(("label", "      Roll back system changes. Uses @ and @home subvolumes.")))
+	items += _snapshot_rows(app)
 	items.append(urwid.Divider())
 	items.append(urwid.CheckBox("  Encrypt with LUKS", state=config.luks,
 	                            on_state_change=_on_luks, user_data=app))
@@ -1260,7 +1285,7 @@ def summary(app):
 		("Swap partition", "yes" if config.has_swap_partition() else "no"),
 		("zram",           "yes" if config.zram else "no"),
 		("Encryption",     "LUKS2" if config.luks else "no"),
-		("Snapshots",      "snapper" if config.snapper else "no"),
+		("Snapshots",      config.snapshot_label()),
 		("Auto updates",   "yes" if config.auto_updates else "no"),
 		("Desktop",        config.desktop_label()),
 		("Mirror",         config.mirror),
