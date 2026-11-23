@@ -763,7 +763,8 @@ def configure_encryption(config: Config):
 	ok("Encryption configured")
 
 
-TIMESHIFT_EXCLUDES = ["/home/**", "/var/log/**", "/tmp/**", "/var/cache/apt/archives/**"]
+TIMESHIFT_EXCLUDES = ["/home/**", "/root/**", "/var/log/**", "/var/tmp/**", "/tmp/**",
+                      "/var/cache/apt/archives/**", "/var/lib/apt/lists/**"]
 
 
 def configure_timeshift(config: Config):
