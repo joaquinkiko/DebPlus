@@ -10,6 +10,7 @@ curl -fsSL $REPO_URL/key.asc -o $KEYRING_PATH
 
 # Add the repository to sources (one line)
 echo "deb [arch=amd64 signed-by=$KEYRING_PATH] $REPO_URL trixie main" | tee /etc/apt/sources.list.d/cosmic-trixie.list
+printf 'Package: *\nPin: origin apt.justaguy.dev\nPin-Priority: 100\n' > /etc/apt/preferences.d/cosmic-trixie
 
 apt-get update
 apt-get install -y cosmic-desktop
