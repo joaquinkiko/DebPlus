@@ -494,12 +494,12 @@ def custom_rows():
 
 
 def wm_rows():
-	"""(id, label, repo, ref, description) per window manager, with local repos resolved."""
+	"""(id, label, repo, ref, description, group) per desktop, with local repos resolved."""
 	rows = []
-	for wm_id, label, repo, ref, description in _rows(WMS_PATH):
+	for wm_id, label, repo, ref, description, group in _rows(WMS_PATH):
 		if repo.startswith("/"):
 			repo = os.path.join(WM_DIR, repo.lstrip("/"))
-		rows.append((wm_id, label, repo, ref, description))
+		rows.append((wm_id, label, repo, ref, description, group))
 	return rows
 
 

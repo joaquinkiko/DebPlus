@@ -942,7 +942,7 @@ def install_window_manager(config: Config) -> bool:
 		entry = next((row for row in utils.wm_rows() if row[0] == config.desktop), None)
 	if entry is None:
 		return True
-	wm_id, label, repo, ref, _description = entry
+	wm_id, label, repo, ref = entry[:4]
 	msg(f"Fetching {label}")
 
 	clone_path = f"/tmp/wm-{wm_id}"

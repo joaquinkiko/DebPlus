@@ -12,6 +12,8 @@ import urwid
 from . import utils
 from .widgets import Selectable, SubmitEdit
 
+CUSTOM_REPO_ENABLED = False
+
 KEYMAP_CHOICES = {
 	"us": "English (US)", "gb": "English (UK)", "de": "German", "fr": "French",
 	"es": "Spanish", "it": "Italian", "pt": "Portuguese", "br": "Portuguese (Brazil)",
@@ -40,6 +42,12 @@ SYMBOL_PATTERN = re.compile(r"[^A-Za-z0-9]")
 STRENGTH_LABELS = ("Very Weak", "Very Weak", "Weak", "Okay", "Strong", "Very Strong", "Very Strong")
 STRENGTH_STYLES = {"Can't be empty": "error", "Very Weak": "error", "Weak": "warning",
                    "Okay": "warning", "Strong": "success", "Very Strong": "success"}
+
+DESKTOP_GROUPS = (
+	("desktop", "Desktop environments"),
+	("wayland", "Wayland window managers"),
+	("x11", "X11 window managers"),
+)
 
 
 def _password_strength(text):
@@ -926,17 +934,19 @@ def desktop(app):
 		]
 	desktop_id, label, package, description = utils.CONSOLE_ROW
 	items += _choice_rows(app, desktop_id, label, package, description)
-	for wm_id, label, _repo, _ref, description in utils.wm_rows():
-		items += _choice_rows(app, wm_id, label, "", description, enabled=app.online)
-	if app.online:
-		items.append(_action("  Custom Repo", lambda _: _custom_repo(app)))
-	else:
-		items.append(urwid.Text(("unset", "  Custom Repo  needs internet")))
-	items += [
-		urwid.Text(("label", "      Any git repo with an install.sh at its root.")),
-		urwid.Divider(),
-		urwid.Text(("label", "  Default GUI environment.")),
-	]
+	rows = utils.wm_rows()
+	for group, heading in DESKTOP_GROUPS:
+		group_rows = [row for row in rows if row[5] == group]
+		if not group_rows:
+			continue
+		items += [urwid.Text(("title", f"  {heading}")), urwid.Divider()]
+		for wm_id, label, _repo, _ref, description, _group in group_rows:
+			items += _choice_rows(app, wm_id, label, "", description, enabled=app.online)
+	if CUSTOM_REPO_ENABLED:
+		if app.online:
+			items.append(_action("  Custom Repo", lambda _: _custom_repo(app)))
+		else:
+			items.append(urwid.Text(("unset", "  Custom Repo  needs internet")))
 	_open(app, "Desktop / Window Manager", _with_back(app, items))
 
 
