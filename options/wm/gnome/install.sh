@@ -17,6 +17,6 @@ purge_installed() {
 apt-get install -y --no-install-recommends gnome-core gdm3
 purge_installed gnome-initial-setup gnome-user-docs gnome-software \
     gnome-maps gnome-weather gnome-contacts gnome-clocks gnome-music \
-	gnome-calendar epiphany-browser
+	gnome-calendar epiphany-browser pkexec
 apt-get autoremove --purge -y
 apt-get clean
