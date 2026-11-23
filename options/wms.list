@@ -3,17 +3,17 @@
 # Each source must have install.sh at its root. Ids must be unique across desktops.list.
 
 # DEs
-cosmic|Cosmic (Trixie)|/cosmic|-|Unofficial JustAGuyLinux Trixie build of System76's Gnome-inspired Desktop
-cinnamon|Cinnamon|/cinnamon|-|Traditional layout, familiar to Windows users
 gnome|GNOME|/gnome|-|Modern, polished, Wayland-first desktop
-lxqt|LXQt|/lxqt|-|Very lightweight Qt desktop
-kde|KDE Plasma|/kde|-|Highly configurable, feature-rich desktop
-mate|MATE|/mate|-|Lightweight GNOME 2 successor
 xfce|Xfce|/xfce|-|Lightweight traditional desktop
+kde|KDE Plasma|/kde|-|Highly configurable, feature-rich desktop
+lxqt|LXQt|/lxqt|-|Very lightweight desktop, good for old hardware
+cosmic|Cosmic|/cosmic|-|Modern Gnome-Inspired desktop (Unofficial Trixie build)
+mate|MATE|/mate|-|Lightweight GNOME 2 successor
+cinnamon|Cinnamon|/cinnamon|-|Traditional desktop with Windows-style layout
 
 ## WMs
-hyprland|Hyprland|/hyprland|-|Dynamic tiling Wayland compositor (backport)
-i3|i3|/i3|-|Tiling X11 window manager
-openbox|Openbox|/openbox|-|Stacking window manager, minimal
-sway|Sway|/sway|-|Tiling Wayland compositor, i3-compatible
-labwc|labwc|/labwc|-|Wayland stacking compositor
+openbox|Openbox|/openbox|-|Minimal stacking window manager
+i3|i3|/i3|-|Tiling window manager for X11
+labwc|labwc|/labwc|-|Wayland window manager with floating windows, inspired by Openbox
+sway|Sway|/sway|-|Tiling window manager for Wayland inspired by i3
+hyprland|Hyprland|/hyprland|-|Highly-customizable tiling compositor for Wayland (Backported)
