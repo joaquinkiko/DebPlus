@@ -18,7 +18,16 @@ apt-get install -y --no-install-recommends \
 	mousepad mpv nemo synaptic lxtask \
 	xdg-user-dirs xdg-utils sensible-utils fonts-recommended
 
+apt-get install -y --no-install-recommends \
+	xdg-desktop-portal gvfs gvfs-backends udisks2 imv zathura file-roller \
+	gnome-keyring libpam-gnome-keyring seahorse \
+	wdisplays wlogout wlsunset
+
+. /etc/default/keyboard
+KEYBOARD_LAYOUT="${XKBLAYOUT:-us}"
+
 install -Dm644 "$SCRIPT_DIRECTORY/config" /etc/sway/config
+sed -i "s/^input type:keyboard {/&\n    xkb_layout $KEYBOARD_LAYOUT/" /etc/sway/config
 install -Dm644 "$SCRIPT_DIRECTORY/sway.png" /usr/share/backgrounds/wallpaper.png
 install -Dm644 "$SCRIPT_DIRECTORY/waybar.jsonc" /etc/xdg/waybar/config.jsonc
 install -Dm644 "$SCRIPT_DIRECTORY/mimeapps.list" /etc/xdg/mimeapps.list

@@ -2,7 +2,7 @@
 panel_monitor = all
 panel_position = bottom center horizontal
 panel_size = 100% 40
-panel_items = TSC
+panel_items = TSBC
 panel_background_id = 1
 panel_padding = 8 4 8
 font = Sans 10
@@ -22,6 +22,9 @@ time1_format = %H:%M
 clock_font_color = #cdd6f4 100
 clock_background_id = 0
 clock_padding = 8 0
+battery_low_status = 15
+bat1_format = %p
+battery_background_id = 0
 
 rounded = 0
 border_width = 0

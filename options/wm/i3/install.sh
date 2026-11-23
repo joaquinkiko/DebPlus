@@ -16,7 +16,14 @@ apt-get install -y --no-install-recommends \
 	mousepad mpv nemo synaptic lxtask \
 	xdg-user-dirs xdg-utils sensible-utils libpam-systemd fonts-recommended
 
+apt-get install -y --no-install-recommends \
+	xdg-desktop-portal gvfs gvfs-backends udisks2 imv zathura file-roller \
+	gnome-keyring libpam-gnome-keyring seahorse \
+	xserver-xorg-input-libinput x11-xserver-utils arandr oblogout \
+	redshift-gtk geoclue-2.0
+
 install -Dm644 "$SCRIPT_DIRECTORY/config" /etc/i3/config
+install -Dm644 "$SCRIPT_DIRECTORY/i3status.conf" /etc/i3status.conf
 install -Dm644 "$SCRIPT_DIRECTORY/i3.png" /usr/share/backgrounds/wallpaper.png
 install -Dm644 "$SCRIPT_DIRECTORY/mimeapps.list" /etc/xdg/mimeapps.list
 install -Dm644 "$SCRIPT_DIRECTORY/user-dirs.defaults" /etc/xdg/user-dirs.defaults

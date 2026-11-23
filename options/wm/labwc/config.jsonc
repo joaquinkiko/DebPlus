@@ -6,7 +6,7 @@
 	"exclusive": true,
 	"modules-left": [],
 	"modules-center": ["wlr/taskbar"],
-	"modules-right": ["tray", "network", "pulseaudio", "clock"],
+	"modules-right": ["tray", "network", "pulseaudio", "battery", "clock"],
 	"wlr/taskbar": {
 		"format": "{icon}",
 		"icon-size": 28,
@@ -22,6 +22,10 @@
 	"pulseaudio": {
 		"format": "{volume}%",
 		"on-click": "pavucontrol"
+	},
+	"battery": {
+		"format": "{capacity}%",
+		"states": { "warning": 30, "critical": 15 }
 	},
 	"clock": {
 		"format": "{:%H:%M}"

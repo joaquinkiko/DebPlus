@@ -18,6 +18,14 @@ apt-get install -y --no-install-recommends \
 	network-manager-gnome \
 	mousepad mpv nemo synaptic lxtask
 
+apt-get install -y --no-install-recommends \
+	xdg-desktop-portal gvfs gvfs-backends udisks2 imv zathura file-roller \
+	gnome-keyring libpam-gnome-keyring seahorse \
+	wdisplays wlogout wlsunset
+
+. /etc/default/keyboard
+KEYBOARD_LAYOUT="${XKBLAYOUT:-us}"
+
 install -Dm644 "$SCRIPT_DIRECTORY/labwc.png" /usr/share/backgrounds/wallpaper.png
 install -Dm644 "$SCRIPT_DIRECTORY/rc.xml" /etc/xdg/labwc/rc.xml
 install -Dm644 "$SCRIPT_DIRECTORY/autostart" /etc/xdg/labwc/autostart
@@ -25,6 +33,7 @@ install -Dm644 "$SCRIPT_DIRECTORY/config.jsonc" /etc/xdg/waybar/config.jsonc
 install -Dm644 "$SCRIPT_DIRECTORY/config.toml" /etc/greetd/config.toml
 install -Dm644 "$SCRIPT_DIRECTORY/mimeapps.list" /etc/xdg/mimeapps.list
 install -Dm644 "$SCRIPT_DIRECTORY/user-dirs.defaults" /etc/xdg/user-dirs.defaults
+echo "XKB_DEFAULT_LAYOUT=$KEYBOARD_LAYOUT" >> /etc/environment
 install -Dm644 "$SCRIPT_DIRECTORY/gtk-settings.ini" /etc/xdg/gtk-3.0/settings.ini
 install -Dm644 "$SCRIPT_DIRECTORY/gtk-settings.ini" /etc/xdg/gtk-4.0/settings.ini
 install -Dm644 "$SCRIPT_DIRECTORY/labwc-themerc" /usr/share/themes/DebPlusDark/labwc/themerc

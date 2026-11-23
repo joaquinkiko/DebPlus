@@ -6,3 +6,5 @@ lxpolkit &
 nm-applet &
 mako &
 xdg-user-dirs-update &
+gnome-keyring-daemon --start --components=secrets &
+wlsunset -S 07:00 -s 20:00 &

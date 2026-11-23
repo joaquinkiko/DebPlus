@@ -4,7 +4,7 @@
 	"height": 32,
 	"modules-left": ["sway/workspaces", "sway/mode"],
 	"modules-center": ["sway/window"],
-	"modules-right": ["tray", "pulseaudio", "network", "clock"],
+	"modules-right": ["tray", "pulseaudio", "network", "battery", "clock"],
 	"sway/workspaces": { "disable-scroll": true },
 	"tray": { "spacing": 8 },
 	"pulseaudio": { "format": "{volume}%", "on-click": "pavucontrol" },
@@ -13,6 +13,10 @@
 		"format-ethernet": "wired",
 		"format-disconnected": "offline",
 		"on-click": "nm-connection-editor"
+	},
+	"battery": {
+		"format": "{capacity}%",
+		"states": { "warning": 30, "critical": 15 }
 	},
 	"clock": { "format": "{:%H:%M}" }
 }

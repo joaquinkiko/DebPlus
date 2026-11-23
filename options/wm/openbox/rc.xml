@@ -24,8 +24,11 @@
 		<keybind key="W-S-a">
 			<action name="Execute"><command>synaptic-pkexec</command></action>
 		</keybind>
-		<keybind key="W-S-x">
+		<keybind key="W-S-l">
 			<action name="Execute"><command>i3lock -n -c 000000</command></action>
+		</keybind>
+		<keybind key="W-S-x">
+			<action name="Execute"><command>oblogout</command></action>
 		</keybind>
 		<keybind key="Print">
 			<action name="Execute"><command>sh -c 'maim -s "$HOME/Pictures/$(date +%F_%T).png"'</command></action>

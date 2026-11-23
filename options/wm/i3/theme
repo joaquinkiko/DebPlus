@@ -22,7 +22,7 @@ client.placeholder       $crust   $crust   $text    $crust   $crust
 client.background        $base
 
 bar {
-	status_command i3status
+	status_command i3status -c /etc/i3status.conf
 	tray_output primary
 	position bottom
 	colors {

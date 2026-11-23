@@ -29,6 +29,8 @@ exec autotiling
 exec nm-applet
 exec lxpolkit
 exec xdg-user-dirs-update
+exec gnome-keyring-daemon --start --components=secrets
+exec wlsunset -S 07:00 -s 20:00
 
 bar {
 	swaybar_command waybar
@@ -71,6 +73,7 @@ bindsym $mod+$smod+a exec synaptic-pkexec
 floating_modifier $mod normal
 bindsym $mod+$smod+q kill
 bindsym $mod+$smod+l exec $lock
+bindsym $mod+$smod+x exec wlogout
 bindsym $mod+$smod+e exec swaynag -t warning -m 'You pressed the exit shortcut. Do you really want to exit sway? This will end your Wayland session.' -B 'Yes, exit sway' 'swaymsg exit'
 bindsym $mod+$smod+c reload
 

@@ -34,6 +34,8 @@ hl.on("hyprland.start", function()
 	hl.exec_cmd("mako")
 	hl.exec_cmd("hypridle")
 	hl.exec_cmd("nm-applet")
+	hl.exec_cmd("gnome-keyring-daemon --start --components=secrets")
+	hl.exec_cmd("wlsunset -S 07:00 -s 20:00")
 	hl.exec_cmd(polkitAgent)
 end)
 
@@ -151,6 +153,7 @@ hl.bind(mainMod .. " + U", hl.dsp.exec_cmd(audioMixer))
 hl.bind(mainMod .. " + Escape", hl.dsp.exec_cmd(taskManager))
 hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd(appStore))
 hl.bind(mainMod .. " + SHIFT + L", hl.dsp.exec_cmd("hyprlock"))
+hl.bind(mainMod .. " + SHIFT + X", hl.dsp.exec_cmd("wlogout"))
 hl.bind("Print", hl.dsp.exec_cmd([[sh -c 'grim -g "$(slurp)" "$HOME/Pictures/$(date +%F_%T).png"']]))
 
 -- Window management

@@ -7,3 +7,7 @@ lxpolkit &
 tint2 -c /etc/xdg/tint2/tint2rc &
 xss-lock --transfer-sleep-lock -- i3lock -n -c 000000 &
 xdg-user-dirs-update &
+xset s 600 600 &
+xset dpms 900 900 900 &
+gnome-keyring-daemon --start --components=secrets &
+redshift-gtk -l geoclue2 &

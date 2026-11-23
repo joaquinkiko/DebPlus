@@ -37,6 +37,14 @@ apt-get install -y --no-install-recommends \
 	mousepad mpv nemo synaptic lxtask \
 	xdg-user-dirs xdg-utils
 
+apt-get install -y --no-install-recommends \
+	xdg-desktop-portal gvfs gvfs-backends udisks2 imv zathura file-roller \
+	gnome-keyring libpam-gnome-keyring seahorse \
+	wdisplays wlogout wlsunset
+
+. /etc/default/keyboard
+KEYBOARD_LAYOUT="${XKBLAYOUT:-us}"
+
 install -Dm644 "$SCRIPT_DIRECTORY/hyprland.png" /usr/share/backgrounds/wallpaper.png
 install -Dm644 "$SCRIPT_DIRECTORY/waybar.jsonc" /etc/xdg/waybar/config.jsonc
 install -Dm644 "$SCRIPT_DIRECTORY/mimeapps.list" /etc/xdg/mimeapps.list
@@ -48,6 +56,8 @@ install -Dm644 "$SCRIPT_DIRECTORY/waybar-style.css" /etc/xdg/waybar/style.css
 
 install -d -o "$USER_NAME" -g "$USER_NAME" "$USER_HOME/.config" "$USER_HOME/.config/hypr"
 install -Dm644 -o "$USER_NAME" -g "$USER_NAME" "$SCRIPT_DIRECTORY/hyprland.lua" "$USER_HOME/.config/hypr/hyprland.lua"
+install -Dm644 -o "$USER_NAME" -g "$USER_NAME" "$SCRIPT_DIRECTORY/hypridle.conf" "$USER_HOME/.config/hypr/hypridle.conf"
+sed -i "s/kb_layout .*/kb_layout  = \"$KEYBOARD_LAYOUT\",/" "$USER_HOME/.config/hypr/hyprland.lua"
 
 update-alternatives --install /usr/bin/x-terminal-emulator x-terminal-emulator /usr/bin/kitty 50
 update-alternatives --set x-terminal-emulator /usr/bin/kitty
