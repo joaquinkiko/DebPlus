@@ -55,6 +55,7 @@ LOG_PATH = "/var/log/debplus/install.log"
 STATE_PATH = "/run/debplus/state"
 
 LUKS_ROOT = "cryptroot"
+LUKS_SWAP = "cryptswap"
 
 LOCAL_REPO_MOUNT = "/media/debplus-repo"  # inside the target, only during install
 APT_COMMAND = ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get"]
@@ -464,7 +465,7 @@ def _format_layout(config: Config):
 			_run(["mkfs.fat", "-F32", device])
 		elif role == "boot":
 			_run(["mkfs.ext4", "-qF", device])
-		elif role == "swap":
+		elif role == "swap" and not config.luks:
 			_run(["mkswap", device])
 		elif role in ("root", "home"):
 			_make_filesystem(device, config.filesystem)
@@ -513,9 +514,11 @@ def mount_secondary(config: Config):
 
 
 def _device(config: Config, role):
-	"""Device to format or mount for a role. The encrypted root uses its open mapper."""
+	"""Device to format or mount for a role. Encrypted root and swap use their open mapper."""
 	if config.luks and role == "root":
 		return f"/dev/mapper/{LUKS_ROOT}"
+	if config.luks and role == "swap":
+		return f"/dev/mapper/{LUKS_SWAP}"
 	return config.layout[role]["device"]
 
 
@@ -748,10 +751,15 @@ def install_base(config: Config):
 
 def configure_encryption(config: Config):
 	msg("Configuring encryption...")
-	line = f"{LUKS_ROOT} UUID={_blkid(config.layout['root']['device'], 'UUID')} none luks,tries=5"
-	_write_target("/etc/crypttab", line + "\n")
+	root_uuid = _blkid(config.layout["root"]["device"], "UUID")
+	lines = [f"{LUKS_ROOT} UUID={root_uuid} none luks,tries=5"]
+	if "swap" in config.layout:
+		# Plain dm-crypt with a random key each boot. PARTUUID because the raw partition has no UUID.
+		swap_partuuid = _blkid(config.layout["swap"]["device"], "PARTUUID")
+		lines.append(f"{LUKS_SWAP} PARTUUID={swap_partuuid} /dev/urandom "
+		             "swap,cipher=aes-xts-plain64,size=512,nofail")
+	_write_target("/etc/crypttab", "\n".join(lines) + "\n")
 	ok("Encryption configured")
-	
 
 
 def configure_snapper(config: Config):
