@@ -1,0 +1,9 @@
+# Openbox session autostart. Installed to /etc/xdg/openbox/autostart.
+feh --no-fehbg --bg-fill /usr/share/backgrounds/wallpaper.png &
+picom -b &
+dunst &
+nm-applet &
+lxpolkit &
+tint2 &
+xss-lock --transfer-sleep-lock -- i3lock -n -c 000000 &
+xdg-user-dirs-update &

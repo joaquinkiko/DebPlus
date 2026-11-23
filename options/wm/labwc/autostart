@@ -1,5 +1,8 @@
+# labwc session autostart. Installed to /etc/xdg/labwc/autostart.
 waybar &
 swaybg -i /usr/share/backgrounds/wallpaper.png -m fill &
 swayidle -w timeout 900 'swaylock -f' timeout 1200 'wlopm --off "*"' resume 'wlopm --on "*"' before-sleep 'swaylock -f' &
 lxpolkit &
+nm-applet &
 mako &
+xdg-user-dirs-update &

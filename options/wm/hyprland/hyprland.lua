@@ -1,41 +1,18 @@
-#!/bin/bash
-# Hyprland 0.56 from trixie-backports for DebPlus
-set -e
-export DEBIAN_FRONTEND=noninteractive
+-- Hyprland config. Installed to ~/.config/hypr/hyprland.lua.
 
-backports_suite="trixie-backports"
+local mainMod = "SUPER" -- Windows key
 
-if ! grep -q "$backports_suite" /etc/apt/sources.list.d/debian.sources; then
-	cat >> /etc/apt/sources.list.d/debian.sources << BACKPORTS
-
-Types: deb
-URIs: https://deb.debian.org/debian
-Suites: $backports_suite
-Components: main contrib non-free-firmware non-free
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-BACKPORTS
-fi
-printf 'Package: *\nPin: release a=%s\nPin-Priority: 100\n' "$backports_suite" \
-	> /etc/apt/preferences.d/backports
-
-apt-get update
-apt-get install -y --no-install-recommends -t "$backports_suite" \
-	hyprland hyprlock hypridle hyprpolkitagent xdg-desktop-portal-hyprland
-apt-get install -y --no-install-recommends waybar wofi kitty mako-notifier \
-	grim slurp wl-clipboard fonts-dejavu-core \
-	libpam-systemd lightdm lightdm-gtk-greeter \
-	pipewire pipewire-pulse wireplumber \
-	brightnessctl playerctl \
-	xdg-user-dirs-gtk
-
-USER_NAME="$(getent passwd 1000 | cut -d: -f1)"
-USER_HOME="/home/$USER_NAME"
-mkdir -p "$USER_HOME/.config/hypr"
-cat > "$USER_HOME/.config/hypr/hyprland.lua" << 'HYPR'
--- Hyprland config
+-- Programs
+local term = "x-terminal-emulator"
+local fileManager = "sh -c 'xdg-open \"$HOME\"'"
+local menu = "wofi --show drun"
+local audioMixer = "pavucontrol"
+local taskManager = "lxtask"
+local appStore = "synaptic-pkexec"
+local wallpaperPath = "/usr/share/backgrounds/wallpaper.png"
+local polkitAgent = "/usr/lib/hyprpolkitagent/hyprpolkitagent"
 
 -- Monitors
-
 -- See https://wiki.hypr.land/configuring/core/monitors/
 hl.monitor({
     output   = "",
@@ -44,35 +21,24 @@ hl.monitor({
     scale    = "auto",
 })
 
--- Programs
-
-local term = "kitty"
-local fileManager = "nemo"
-local menu = "wofi --show drun"
-
--- Environment Variables
-
+-- Environment
 -- See https://wiki.hypr.land/configuring/core/environment-variables/
 hl.env("XCURSOR_SIZE", "24")
 hl.env("HYPRCURSOR_SIZE", "24")
 
 -- Startup
-
-local wallpaperPath = "/usr/share/backgrounds/wallpaper.png"
-local polkitAgent = "/usr/lib/hyprpolkitagent/hyprpolkitagent"
-
 hl.on("hyprland.start", function()
 	hl.exec_cmd("xdg-user-dirs-update")
 	hl.exec_cmd("swaybg -m fill -i " .. wallpaperPath)
 	hl.exec_cmd("waybar")
 	hl.exec_cmd("mako")
 	hl.exec_cmd("hypridle")
+	hl.exec_cmd("nm-applet")
 	hl.exec_cmd(polkitAgent)
 end)
 
 -- Look and Feel
-
--- Refer to https://wiki.hypr.land/configuring/core/config-options/
+-- See https://wiki.hypr.land/configuring/core/config-options/
 hl.config({
     general = {
         gaps_in  = 5,
@@ -85,12 +51,8 @@ hl.config({
             inactive_border = "rgba(595959aa)",
         },
 
-        -- Set to true to enable resizing windows by clicking and dragging on borders and gaps
         resize_on_border = false,
-
-        -- Please see https://wiki.hypr.land/configuring/extra/tearing/ before you turn this on
         allow_tearing = false,
-
         layout = "dwindle",
     },
 
@@ -98,7 +60,6 @@ hl.config({
         rounding       = 10,
         rounding_power = 2,
 
-        -- Change transparency of focused and unfocused windows
         active_opacity   = 1.0,
         inactive_opacity = 1.0,
 
@@ -122,14 +83,12 @@ hl.config({
     },
 })
 
--- Default curves and animations, see https://wiki.hypr.land/configuring/core/animations/
+-- Curves and animations, see https://wiki.hypr.land/configuring/core/animations/
 hl.curve("easeOutQuint",   { type = "bezier", points = { {0.23, 1},    {0.32, 1}    } })
 hl.curve("easeInOutCubic", { type = "bezier", points = { {0.65, 0.05}, {0.36, 1}    } })
 hl.curve("linear",         { type = "bezier", points = { {0, 0},       {1, 1}       } })
 hl.curve("almostLinear",   { type = "bezier", points = { {0.5, 0.5},   {0.75, 1}    } })
 hl.curve("quick",          { type = "bezier", points = { {0.15, 0},    {0.1, 1}     } })
-
--- Default springs
 hl.curve("easy",           { type = "spring", mass = 1, stiffness = 238.1191, damping = 24.21279333 })
 
 hl.animation({ leaf = "global",        enabled = true,  speed = 10,   bezier = "default" })
@@ -150,36 +109,13 @@ hl.animation({ leaf = "workspacesIn",  enabled = true,  speed = 1.21, bezier = "
 hl.animation({ leaf = "workspacesOut", enabled = true,  speed = 1.94, bezier = "almostLinear", style = "fade" })
 hl.animation({ leaf = "zoomFactor",    enabled = true,  speed = 7,    bezier = "quick" })
 
--- See https://wiki.hypr.land/configuring/layouts/dwindle-layout/ for more
-hl.config({
-    dwindle = {
-        preserve_split = true, -- You probably want this
-    },
-})
-
--- See https://wiki.hypr.land/configuring/layouts/master-layout/ for more
-hl.config({
-    master = {
-        new_status = "master",
-    },
-})
-
--- See https://wiki.hypr.land/configuring/layouts/scrolling-layout/ for more
-hl.config({
-    scrolling = {
-        fullscreen_on_one_column = true,
-    },
-})
-
-hl.config({
-    misc = {
-        force_default_wallpaper = -1,
-        disable_hyprland_logo   = false,
-    },
-})
+-- Layouts
+hl.config({ dwindle = { preserve_split = true } })
+hl.config({ master = { new_status = "master" } })
+hl.config({ scrolling = { fullscreen_on_one_column = true } })
+hl.config({ misc = { force_default_wallpaper = -1, disable_hyprland_logo = false } })
 
 -- Input
-
 hl.config({
     input = {
         kb_layout  = "us",
@@ -189,8 +125,7 @@ hl.config({
         kb_rules   = "",
 
         follow_mouse = 1,
-
-        sensitivity = 0, -- -1.0 - 1.0, 0 means no modification.
+        sensitivity = 0,
 
         touchpad = {
             natural_scroll = false,
@@ -206,19 +141,21 @@ hl.gesture({
 
 -- Keybindings
 
+-- Apps
+hl.bind(mainMod .. " + Q", hl.dsp.exec_cmd(term))
+hl.bind(mainMod .. " + R", hl.dsp.exec_cmd(menu))
+hl.bind(mainMod .. " + E", hl.dsp.exec_cmd(fileManager))
+hl.bind(mainMod .. " + U", hl.dsp.exec_cmd(audioMixer))
+hl.bind(mainMod .. " + Escape", hl.dsp.exec_cmd(taskManager))
+hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd(appStore))
 hl.bind(mainMod .. " + SHIFT + L", hl.dsp.exec_cmd("hyprlock"))
 hl.bind("Print", hl.dsp.exec_cmd([[sh -c 'grim -g "$(slurp)" "$HOME/Pictures/$(date +%F_%T).png"']]))
 
-local mainMod = "SUPER" -- Sets "Windows" key as main modifier
-
--- Example binds, see https://wiki.hypr.land/configuring/core/binds/ for more
-hl.bind(mainMod .. " + Q", hl.dsp.exec_cmd(term))
+-- Window management
 local closeWindowBind = hl.bind(mainMod .. " + C", hl.dsp.window.close())
 -- closeWindowBind:set_enabled(false)
 hl.bind(mainMod .. " + M", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch 'hl.dsp.exit()'"))
-hl.bind(mainMod .. " + E", hl.dsp.exec_cmd(fileManager))
 hl.bind(mainMod .. " + V", hl.dsp.window.float({ action = "toggle" }))
-hl.bind(mainMod .. " + R", hl.dsp.exec_cmd(menu))
 hl.bind(mainMod .. " + P", hl.dsp.window.pseudo())
 hl.bind(mainMod .. " + J", hl.dsp.layout("togglesplit"))    -- dwindle only
 
@@ -228,15 +165,14 @@ hl.bind(mainMod .. " + right", hl.dsp.focus({ direction = "right" }))
 hl.bind(mainMod .. " + up",    hl.dsp.focus({ direction = "up" }))
 hl.bind(mainMod .. " + down",  hl.dsp.focus({ direction = "down" }))
 
--- Switch workspaces with mainMod + [0-9]
--- Move active window to a workspace with mainMod + SHIFT + [0-9]
+-- Switch workspaces with mainMod + [0-9]; move window with mainMod + SHIFT + [0-9]
 for i = 1, 10 do
     local key = i % 10 -- 10 maps to key 0
-    hl.bind(mainMod .. " + " .. key,             hl.dsp.focus({ workspace = i}))
-    hl.bind(mainMod .. " + SHIFT + " .. key,     hl.dsp.window.move({ workspace = i }))
+    hl.bind(mainMod .. " + " .. key,         hl.dsp.focus({ workspace = i }))
+    hl.bind(mainMod .. " + SHIFT + " .. key, hl.dsp.window.move({ workspace = i }))
 end
 
--- Example special workspace (scratchpad)
+-- Scratchpad
 hl.bind(mainMod .. " + S",         hl.dsp.workspace.toggle_special("magic"))
 hl.bind(mainMod .. " + SHIFT + S", hl.dsp.window.move({ workspace = "special:magic" }))
 
@@ -248,13 +184,13 @@ hl.bind(mainMod .. " + mouse_up",   hl.dsp.focus({ workspace = "e-1" }))
 hl.bind(mainMod .. " + mouse:272", hl.dsp.window.drag(),   { mouse = true })
 hl.bind(mainMod .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
 
--- Laptop multimedia keys for volume and LCD brightness
+-- Laptop multimedia keys
 hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd("wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+"), { locked = true, repeating = true })
 hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"),      { locked = true, repeating = true })
 hl.bind("XF86AudioMute",        hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"),     { locked = true, repeating = true })
 hl.bind("XF86AudioMicMute",     hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"),   { locked = true, repeating = true })
-hl.bind("XF86MonBrightnessUp",  hl.dsp.exec_cmd("brightnessctl -e4 -n2 set 5%+"),                  { locked = true, repeating = true })
-hl.bind("XF86MonBrightnessDown",hl.dsp.exec_cmd("brightnessctl -e4 -n2 set 5%-"),                  { locked = true, repeating = true })
+hl.bind("XF86MonBrightnessUp",   hl.dsp.exec_cmd("brightnessctl -e4 -n2 set 5%+"),                 { locked = true, repeating = true })
+hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("brightnessctl -e4 -n2 set 5%-"),                 { locked = true, repeating = true })
 
 -- Requires playerctl
 hl.bind("XF86AudioNext",  hl.dsp.exec_cmd("playerctl next"),       { locked = true })
@@ -263,11 +199,8 @@ hl.bind("XF86AudioPlay",  hl.dsp.exec_cmd("playerctl play-pause"), { locked = tr
 hl.bind("XF86AudioPrev",  hl.dsp.exec_cmd("playerctl previous"),   { locked = true })
 
 -- Windows and Workspaces
-
 -- See https://wiki.hypr.land/configuring/core/rules/
-
 local suppressMaximizeRule = hl.window_rule({
-    -- Ignore maximize requests from all apps. You'll probably like this.
     name  = "suppress-maximize-events",
     match = { class = ".*" },
 
@@ -276,7 +209,6 @@ local suppressMaximizeRule = hl.window_rule({
 -- suppressMaximizeRule:set_enabled(false)
 
 hl.window_rule({
-    -- Fix some dragging issues with XWayland
     name  = "fix-xwayland-drags",
     match = {
         class      = "^$",
@@ -290,15 +222,6 @@ hl.window_rule({
     no_focus = true,
 })
 
--- Layer rules also return a handle.
--- local overlayLayerRule = hl.layer_rule({
---     name  = "no-anim-overlay",
---     match = { namespace = "^my-overlay$" },
---     no_anim = true,
--- })
--- overlayLayerRule:set_enabled(false)
-
--- Hyprland-run windowrule
 hl.window_rule({
     name  = "move-hyprland-run",
     match = { class = "hyprland-run" },
@@ -306,8 +229,3 @@ hl.window_rule({
     move  = "20 monitor_h-120",
     float = true,
 })
-
-HYPR
-chown -R "$USER_NAME:$USER_NAME" "$USER_HOME/.config"
-
-apt-get clean
