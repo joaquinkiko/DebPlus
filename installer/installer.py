@@ -770,7 +770,7 @@ def configure_timeshift(config: Config):
 	msg("Configuring Timeshift")
 	settings = {
 		"backup_device_uuid": _blkid(_device(config, "root"), "UUID"),
-		"parent_device_uuid": "",
+		"parent_device_uuid": _blkid(config.layout["root"]["device"], "UUID") if config.luks else "",
 		"do_first_run": False,
 		"btrfs_mode": config.timeshift_btrfs,
 		"include_btrfs_home_for_backup": False,
@@ -782,6 +782,8 @@ def configure_timeshift(config: Config):
 		"schedule_hourly": False,
 		"schedule_boot": False,
 		"count_daily": 3,
+		"count_weekly": 3,
+		"count_monthly": 3,
 		"exclude": TIMESHIFT_EXCLUDES,
 		"exclude-apps": [],
 	}
