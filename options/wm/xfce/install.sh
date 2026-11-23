@@ -3,7 +3,11 @@
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
-apt-get install -y --no-install-recommends xfce4-session xfwm4 xfdesktop4 \
-	xfce4-panel xfce4-settings xfce4-terminal xfce4-power-manager \
-	xfce4-notifyd xfce4-screensaver thunar network-manager-gnome lightdm lightdm-gtk-greeter
+echo "shared/default-x-display-manager select lightdm" | debconf-set-selections
+
+apt-get install -y --no-install-recommends \
+	xfce4-session xfwm4 xfdesktop4 xfce4-panel xfce4-settings \
+	xfce4-terminal xfce4-power-manager xfce4-notifyd xfce4-screensaver \
+	xfce4-appfinder xfce4-taskmanager thunar mousepad parole \
+	network-manager-gnome xdg-desktop-portal-gtk lightdm lightdm-gtk-greeter
 apt-get clean

@@ -3,6 +3,10 @@
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
-apt-get install -y --no-install-recommends cinnamon-core gnome-terminal \
-	lightdm lightdm-gtk-greeter
+echo "shared/default-x-display-manager select lightdm" | debconf-set-selections
+
+# Network applet ships in cinnamon-core
+apt-get install -y --no-install-recommends \
+	cinnamon-core nemo gnome-terminal xed celluloid gnome-system-monitor \
+	xdg-desktop-portal-gtk lightdm lightdm-gtk-greeter
 apt-get clean
