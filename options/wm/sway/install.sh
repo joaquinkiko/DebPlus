@@ -9,7 +9,7 @@ USER_NAME="$(awk -F: '$3>=1000 && $3<65534 {print $1; exit}' /etc/passwd)"
 apt-get install -y --no-install-recommends \
 	sway swaybg swayidle swaylock xwayland waybar wofi kitty mako-notifier grim slurp \
 	xdg-desktop-portal-wlr xdg-desktop-portal-gtk autotiling \
-	libpam-systemd policykit-1 lxpolkit \
+	libpam-systemd dbus-user-session policykit-1 lxpolkit \
 	greetd seatd tuigreet \
 	network-manager-gnome \
 	pipewire pipewire-pulse wireplumber pavucontrol brightnessctl playerctl \
@@ -38,7 +38,6 @@ install -Dm644 "$SCRIPT_DIRECTORY/waybar-style.css" /etc/xdg/waybar/style.css
 
 update-alternatives --install /usr/bin/x-terminal-emulator x-terminal-emulator /usr/bin/kitty 50
 update-alternatives --set x-terminal-emulator /usr/bin/kitty
-update-alternatives --set x-www-browser /usr/bin/firefox-esr
 
 systemctl enable seatd
 systemctl disable getty@tty1.service

@@ -14,7 +14,7 @@ apt-get install -y --no-install-recommends \
 	network-manager-gnome lxpolkit policykit-1 \
 	pipewire pipewire-pulse wireplumber pavucontrol brightnessctl playerctl \
 	mousepad mpv nemo synaptic lxtask \
-	xdg-user-dirs xdg-utils libpam-systemd fonts-recommended
+	xdg-user-dirs xdg-utils libpam-systemd dbus-user-session fonts-recommended
 
 apt-get install -y --no-install-recommends \
 	xdg-desktop-portal gvfs gvfs-backends udisks2 imv zathura file-roller \

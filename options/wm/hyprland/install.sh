@@ -28,7 +28,7 @@ apt-get install -y --no-install-recommends -t "$BACKPORTS_SUITE" \
 apt-get install -y --no-install-recommends \
 	waybar wofi kitty mako-notifier grim slurp wl-clipboard fonts-dejavu-core \
 	swaybg xdg-desktop-portal-gtk \
-	libpam-systemd policykit-1 \
+	libpam-systemd dbus-user-session policykit-1 \
 	greetd seatd tuigreet \
 	network-manager-gnome \
 	pipewire pipewire-pulse wireplumber pavucontrol brightnessctl playerctl \
