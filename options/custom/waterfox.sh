@@ -7,7 +7,7 @@ REPOSITORY_URL="https://download.opensuse.org/repositories/isv:/BrowserWorks/Deb
 KEYRING_PATH="/usr/share/keyrings/waterfox.gpg"
 
 apt-get install -y --no-install-recommends gnupg
-curl -fsSL "$REPOSITORY_URL/Release.key" | gpg --dearmor -o "$KEYRING_PATH"
+curl -fsSL "$REPOSITORY_URL/Release.key" | gpg --dearmor --yes -o "$KEYRING_PATH"
 echo "deb [signed-by=$KEYRING_PATH] $REPOSITORY_URL/ /" > /etc/apt/sources.list.d/waterfox.list
 apt-get update
 apt-get install -y --no-install-recommends waterfox

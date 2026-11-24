@@ -7,8 +7,11 @@ REPOSITORY_URL="https://download.opensuse.org/repositories/home:/strycore:/lutri
 KEYRING_PATH="/etc/apt/keyrings/lutris.gpg"
 
 apt-get install -y --no-install-recommends gnupg
-echo -e "Types: deb\nURIs: $REPOSITORY_URL/\nSuites: ./\nComponents: \nSigned-By: $KEYRING_PATH" | tee /etc/apt/sources.list.d/lutris.sources > /dev/null
-wget -q -O- $REPOSITORY_URL/Release.key | gpg --dearmor -o $KEYRING_PATH
+mkdir -p /etc/apt/keyrings
+# printf, not echo -e: sh is dash here and its echo does not take -e
+printf 'Types: deb\nURIs: %s/\nSuites: ./\nComponents: \nSigned-By: %s\n' \
+	"$REPOSITORY_URL" "$KEYRING_PATH" > /etc/apt/sources.list.d/lutris.sources
+wget -q -O- "$REPOSITORY_URL/Release.key" | gpg --dearmor --yes -o "$KEYRING_PATH"
 
 apt-get update
 apt-get install -y --no-install-recommends lutris

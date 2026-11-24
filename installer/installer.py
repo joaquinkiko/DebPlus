@@ -59,6 +59,7 @@ LUKS_ROOT = "cryptroot"
 LUKS_SWAP = "cryptswap"
 
 LOCAL_REPO_MOUNT = "/media/debplus-repo"  # inside the target, only during install
+APT_NONINTERACTIVE = "/etc/apt/apt.conf.d/99debplus-noninteractive"  # install-time only, removed in cleanup
 APT_COMMAND = ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get",
                "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"]
 # Offline apt reads only the local repo. Check-Date is off because an offline RTC is often wrong.
@@ -729,6 +730,12 @@ def install_packages(config: Config):
 	_chroot(["apt-get", "clean"])
 
 
+def write_apt_noninteractive():
+	"""Make apt calls in the custom and desktop scripts keep existing conffiles instead of prompting."""
+	_write_target(APT_NONINTERACTIVE,
+	              'Dpkg::Options { "--force-confdef"; "--force-confold"; };\n')
+
+
 def install_base(config: Config):
 	image = utils.target_image()
 	if not image:
@@ -740,6 +747,7 @@ def install_base(config: Config):
 	_remove(f"{MNT}/etc/resolv.conf")
 	shutil.copy2("/etc/resolv.conf", f"{MNT}/etc/resolv.conf")
 	mount_secondary(config)
+	write_apt_noninteractive()
 	msg("Configuring apt sources")
 	write_apt_sources(config)
 	mount_chroot_fs()
@@ -1154,6 +1162,7 @@ def configure_git(config: Config):
 def cleanup():
 	ui.stop_spinner()
 	msg("Unmounting")
+	_remove(f"{MNT}{APT_NONINTERACTIVE}")
 	if os.path.isdir(f"{MNT}/var/log"):
 		try:
 			shutil.copy2(LOG_PATH, f"{MNT}/var/log/debplus-install.log")

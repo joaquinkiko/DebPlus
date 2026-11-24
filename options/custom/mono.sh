@@ -1,5 +1,5 @@
 #!/bin/sh
-# Adds the Mono repository and installs mono-devel. Runs inside the target chroot.
+# Adds the Mono repository and installs mono-complete. Runs inside the target chroot.
 set -e
 export DEBIAN_FRONTEND=noninteractive
 

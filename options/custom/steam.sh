@@ -12,12 +12,15 @@ if grep -hsv '^[[:space:]]*#' $sourcesPaths | grep -q "$backportsSuite"; then
 	target_flag="-t trixie-backports"
 fi
 
-# Ensure i386 is activeuser
+# Ensure i386 is active
 if ! dpkg --print-foreign-architectures | grep -qx 'i386'; then
 	dpkg --add-architecture i386
-    apt-get update
+	apt-get update
 fi
 
+# steam-installer asks to accept the license. Noninteractive installs fail without an answer.
+echo "steam steam/question select I AGREE" | debconf-set-selections
+echo "steam steam/license note" | debconf-set-selections
 
 install_steam() {
 	apt-get install -y $target_flag steam-installer steam-devices

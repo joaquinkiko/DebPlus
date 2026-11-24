@@ -7,7 +7,7 @@ REPOSITORY_URL="https://updates.signal.org/desktop/apt"
 KEYRING_PATH="/usr/share/keyrings/signal-desktop-keyring.gpg"
 
 apt-get install -y --no-install-recommends gnupg
-curl -fsSL "$REPOSITORY_URL/keys.asc" | gpg --dearmor -o "$KEYRING_PATH"
+curl -fsSL "$REPOSITORY_URL/keys.asc" | gpg --dearmor --yes -o "$KEYRING_PATH"
 echo "deb [arch=amd64 signed-by=$KEYRING_PATH] $REPOSITORY_URL xenial main" > /etc/apt/sources.list.d/signal-xenial.list
 
 apt-get update

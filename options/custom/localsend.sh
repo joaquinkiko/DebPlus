@@ -1,5 +1,5 @@
 #!/bin/sh
-# Heroic flatpak installer
+# LocalSend flatpak installer
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
