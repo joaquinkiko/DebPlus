@@ -59,7 +59,8 @@ LUKS_ROOT = "cryptroot"
 LUKS_SWAP = "cryptswap"
 
 LOCAL_REPO_MOUNT = "/media/debplus-repo"  # inside the target, only during install
-APT_COMMAND = ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get"]
+APT_COMMAND = ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get",
+               "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"]
 # Offline apt reads only the local repo. Check-Date is off because an offline RTC is often wrong.
 LOCAL_APT_OPTIONS = [
 	"-o", "Dir::Etc::sourcelist=debplus-local.list",
@@ -246,7 +247,8 @@ def _execute(argv):
 	"""Run argv with its output going to the install log. Returns the exit status."""
 	_log(f"$ {shlex.join(argv)}")
 	with open(LOG_PATH, "a") as log_file:
-		return subprocess.run(argv, stdout=log_file, stderr=subprocess.STDOUT).returncode
+		return subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=log_file,
+		                      stderr=subprocess.STDOUT).returncode
 
 
 def _run(argv):
@@ -745,6 +747,7 @@ def install_base(config: Config):
 	if config.multiarch_i386:
 		msg("Enabling 32-bit (i386) architecture")
 		_chroot(["dpkg", "--add-architecture", "i386"])
+	prepare_secure_boot_key(config)  # before DKMS packages build, so their modules get signed
 	install_packages(config)
 	ok("Base system installed")
 
@@ -802,14 +805,18 @@ def configure_timeshift(config: Config):
 	ok("Timeshift configured")
 
 
-def take_first_snapshot() -> bool:
-	msg("Creating first Timeshift snapshot")
-	if _chroot_ok(["timeshift", "--create", "--scripted",
-	               "--comments", "Fresh install", "--tags", "O"]):
-		ok("First Timeshift snapshot created")
-		return True
-	_log("First Timeshift snapshot failed. Run: sudo timeshift --create")
-	return False
+def schedule_first_snapshot():
+	"""Timeshift cannot see the target's mounts from inside the chroot, so the first snapshot runs on first boot."""
+	msg("Scheduling first Timeshift snapshot")
+	_write_target("/etc/systemd/system/timeshift-firstsnap.service",
+				  "[Unit]\nDescription=First Timeshift snapshot\n"
+				  "ConditionPathExists=!/var/lib/debplus-firstsnap\nAfter=local-fs.target\n\n"
+				  "[Service]\nType=oneshot\n"
+				  "ExecStart=/usr/bin/timeshift --create --scripted --comments \"Fresh install\" --tags O\n"
+				  "ExecStartPost=/usr/bin/touch /var/lib/debplus-firstsnap\n\n"
+				  "[Install]\nWantedBy=multi-user.target\n")
+	_chroot(["systemctl", "enable", "timeshift-firstsnap.service"])
+	ok("First snapshot scheduled for first boot")
 
 
 def configure_auto_updates():
@@ -906,7 +913,8 @@ def _chpasswd(line):
 
 def create_users(config: Config):
 	msg("Creating users")
-	_chroot(["groupadd", "-f", "lpadmin"])
+	for group in ("lpadmin", "netdev", "audio", "video", "sudo"):
+		_chroot(["groupadd", "-f", group])
 	user_known = subprocess.run(["chroot", MNT, "id", config.username],
 	                            capture_output=True).returncode == 0
 	if not user_known:
@@ -966,7 +974,7 @@ def install_extras(config: Config) -> list:
 			continue  # custom scripts run separately; local-repo packages are already installed
 		label = labels.get(package, package)
 		msg(f"Installing {label} (apt)")
-		if not _report(label, _chroot_ok([*APT_COMMAND, "install", "-y", package]),
+		if not _report(label, _chroot_ok([*APT_COMMAND, "install", "-y", *package.split()]),
 		               f"Fix it from Shell, or rerun: apt-get install {package}"):
 			failed.append(label)
 	return failed
@@ -999,7 +1007,8 @@ def _install_removable_fallback():
 	os.makedirs(target_dir, exist_ok=True)
 	shutil.copy2(f"{source_dir}/shimx64.efi", f"{target_dir}/BOOTX64.EFI")
 	for name in ("grubx64.efi", "mmx64.efi"):
-		shutil.copy2(f"{source_dir}/{name}", f"{target_dir}/{name}")
+		if os.path.isfile(f"{source_dir}/{name}"):
+			shutil.copy2(f"{source_dir}/{name}", f"{target_dir}/{name}")
 
 
 def ensure_grub_modules(config: Config):
@@ -1063,24 +1072,33 @@ def install_bootloader(config: Config):
 	ok("Bootloader installed")
 
 
+def prepare_secure_boot_key(config: Config):
+	"""Create the signing key and point DKMS at it before any DKMS package is installed."""
+	if not config.needs_mok():
+		return
+	msg("Preparing Secure Boot signing key")
+	key_dir = f"{MNT}/var/lib/dkms"
+	os.makedirs(key_dir, exist_ok=True)
+	if not os.path.isfile(f"{key_dir}/mok.key"):
+		_chroot(["openssl", "req", "-new", "-x509", "-newkey", "rsa:2048", "-nodes",
+				 "-days", "36500", "-subj", "/CN=DebPlus Secure Boot/",
+				 "-keyout", "/var/lib/dkms/mok.key", "-out", "/var/lib/dkms/mok.pub"])
+		os.chmod(f"{key_dir}/mok.key", 0o600)
+	if not os.path.isfile(f"{key_dir}/mok.der"):
+		_chroot(["openssl", "x509", "-outform", "DER",
+				 "-in", "/var/lib/dkms/mok.pub", "-out", "/var/lib/dkms/mok.der"])
+	os.makedirs(f"{MNT}/etc/dkms/framework.conf.d", exist_ok=True)  # drop-in, so no conffile clash with dkms
+	_write_target("/etc/dkms/framework.conf.d/debplus-mok.conf",
+				  "mok_signing_key=/var/lib/dkms/mok.key\n"
+				  "mok_certificate=/var/lib/dkms/mok.pub\n")
+
+
 def configure_secure_boot(config: Config):
 	if not config.needs_mok():
 		return
 	msg("Setting up Secure Boot signing")
+	prepare_secure_boot_key(config)  # normally done already in the base stage
 	key_dir = f"{MNT}/var/lib/dkms"
-	os.makedirs(key_dir, exist_ok=True)
-	_chroot(["openssl", "req", "-new", "-x509", "-newkey", "rsa:2048", "-nodes",
-	         "-days", "36500", "-subj", "/CN=DebPlus Secure Boot/",
-	         "-keyout", "/var/lib/dkms/mok.key", "-out", "/var/lib/dkms/mok.pub"])
-	os.chmod(f"{key_dir}/mok.key", 0o600)
-	_chroot(["openssl", "x509", "-outform", "DER",
-	         "-in", "/var/lib/dkms/mok.pub", "-out", "/var/lib/dkms/mok.der"])
-
-	os.makedirs(f"{MNT}/etc/dkms", exist_ok=True)  # may be absent if DKMS is not yet installed
-	_write_target("/etc/dkms/framework.conf",
-	              "mok_signing_key=/var/lib/dkms/mok.key\n"
-	              "mok_certificate=/var/lib/dkms/mok.pub\n", append=True)
-
 	modules_dir = f"{MNT}/lib/modules"
 	kernel_versions = sorted(os.listdir(modules_dir)) if os.path.isdir(modules_dir) else []
 	for version in kernel_versions:
@@ -1089,25 +1107,31 @@ def configure_secure_boot(config: Config):
 			_chroot(["dkms", "autoinstall", "-k", version])
 
 	result = subprocess.run(["mokutil", "--import", f"{key_dir}/mok.der"],
-	                        input=f"{config.mok_pass}\n{config.mok_pass}\n",
-	                        text=True, capture_output=True)
+							input=f"{config.mok_pass}\n{config.mok_pass}\n",
+							text=True, capture_output=True)
 	if result.returncode != 0:
 		die(f"mokutil import failed: {result.stderr.strip()}")
 	ok("Key queued. On first boot choose Enroll MOK and enter the password.")
 
 
-def configure_firewall(config: Config):
+def configure_firewall(config: Config) -> list:
+	"""Apply UFW settings. Returns the rules that failed, so one bad rule does not strand the install."""
 	if not config.ufw:
-		return
+		return []
 	msg("Configuring firewall")
 	_chroot(["ufw", "default", config.ufw_incoming, "incoming"])
 	_chroot(["ufw", "default", config.ufw_outgoing, "outgoing"])
 	rules = {rule_id: rule for rule_id, _label, rule in utils.firewall_rows()}
+	failed = []
 	for rule_id in config.firewall_rules:
-		_chroot(["ufw", *rules[rule_id].split()])
+		rule = rules.get(rule_id)
+		if rule and not _chroot_ok(["ufw", *rule.split()]):
+			_log(f"ufw rule failed: {rule}")
+			failed.append(f"Firewall rule: {rule}")
 	_chroot(["sed", "-i", "s/^ENABLED=.*/ENABLED=yes/", "/etc/ufw/ufw.conf"])
 	_chroot(["systemctl", "enable", "ufw"])
 	ok("Firewall configured")
+	return failed
 
 
 def configure_git(config: Config):
@@ -1236,8 +1260,7 @@ def run_install(config: Config):
 		if not config.timeshift:
 			return
 		configure_timeshift(config)
-		if not take_first_snapshot():
-			failures.append("First Timeshift snapshot")
+		schedule_first_snapshot()
 
 	def extras_stage():
 		failures.extend(install_extras(config))
@@ -1250,7 +1273,7 @@ def run_install(config: Config):
 		("Users", lambda: create_users(config)),
 		("Desktop", desktop_stage),
 		("Extras", extras_stage),
-		("Firewall", lambda: configure_firewall(config)),
+		("Firewall", lambda: failures.extend(configure_firewall(config))),
 		("Git", lambda: configure_git(config)),
 		("Secure Boot", lambda: configure_secure_boot(config)),
 		("Boot splash", lambda: configure_plymouth(config)),

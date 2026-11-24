@@ -274,10 +274,15 @@ build_base_image() {
 	{
 		optional_names "$SCRIPT_DIR/packages/optional.list"
 		pkg_list "$SCRIPT_DIR/packages/headers.list"
-		baked_extras "$SCRIPT_DIR/options/extras.list"
+		# NVIDIA rows go in their own passes below: the open and proprietary DKMS packages may conflict
+		baked_extras "$SCRIPT_DIR/options/extras.list" | grep -v nvidia || true
 	} | word_list > "$TARGET_DIR/tmp/common.pkgs"
 	boot_set uefi | word_list > "$TARGET_DIR/tmp/uefi.pkgs"
 	boot_set bios | word_list > "$TARGET_DIR/tmp/bios.pkgs"
+	baked_extras "$SCRIPT_DIR/options/extras.list" | grep -E 'nvidia-open-kernel-dkms|nvidia-settings' |
+		word_list > "$TARGET_DIR/tmp/nvidia_open.pkgs"
+	baked_extras "$SCRIPT_DIR/options/extras.list" | grep -E 'nvidia-kernel-dkms|nvidia-settings' |
+		word_list > "$TARGET_DIR/tmp/nvidia_legacy.pkgs"
 
 	run_setup_in_chroot "$TARGET_DIR" << 'SETUP'
 #!/bin/bash
@@ -293,7 +298,7 @@ apt-get install -y --no-install-recommends $(cat /tmp/base.pkgs)
 
 # From here the apt cache must hold only what goes into the repo
 apt-get clean
-for package_set in common uefi bios; do
+for package_set in common uefi bios nvidia_open nvidia_legacy; do
 	apt-get install -y --download-only --no-install-recommends $(cat /tmp/$package_set.pkgs)
 done
 
@@ -370,7 +375,7 @@ build_bios_boot_image() {
 	msg "Building BIOS El Torito image..."
 	grub-mkimage -O i386-pc-eltorito -d /usr/lib/grub/i386-pc \
 		-o "$ISO_DIR/boot/grub/i386-pc/eltorito.img" -p /boot/grub \
-		iso9660 biosdisk part_msdos normal configfile search linux ls echo
+		iso9660 biosdisk part_msdos part_gpt normal configfile search linux ls echo
 }
 
 menu_entry() {

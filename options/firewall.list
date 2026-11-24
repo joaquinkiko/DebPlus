@@ -15,7 +15,8 @@ cups|CUPS printing (IPP, printer browsing)|allow 631
 
 # File transfer
 localsend|LocalSend|allow 53317|on
-kdeconnect|KDE Connect|allow 1714:1764
+kdeconnect-tcp|KDE Connect (TCP)|allow 1714:1764/tcp
+kdeconnect-udp|KDE Connect (UDP)|allow 1714:1764/udp
 
 # Gaming
 steam-remote|Steam Remote Play|allow 27031:27036/udp

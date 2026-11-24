@@ -2,6 +2,7 @@
 linux-image-amd64
 live-boot
 systemd-sysv
+systemd-timesyncd
 network-manager
 python3-urwid
 squashfs-tools

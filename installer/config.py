@@ -13,7 +13,7 @@ REQUIRED_FIELDS = (
 
 @dataclass
 class Config:
-	fake_mode: bool = False  # --fake: UI only, Install disabled
+	fake_mode: bool = False  # --test: UI only, Install disabled
 	boot_mode: str = ""  # "uefi" or "bios", detected at startup
 	keymap: str = ""
 	timezone: str = ""

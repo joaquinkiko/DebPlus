@@ -413,6 +413,19 @@ def _check_image():
 	             "medium. Download the ISO again.")
 
 
+def _check_auto_fit(config):
+	"""Automatic partitioning needs room for root, boot and swap. Only the default mode skips the Partitioning screen."""
+	if config.manual or config.custom or config.free_space:
+		return None
+	ram_gib = math.ceil(ram_mib() / 1024)
+	needed = config.auto_min_disk_gib(ram_gib, config.swap_size)
+	if disk_bytes(config.disk) // 2**30 >= needed:
+		return None
+	return Check("block", "Partitioning",
+				 f"Automatic partitioning needs a {needed} GB disk with this RAM size and these options. "
+				 "Choose Custom sizes or Manual for the disk, or a larger disk.", "disk")
+
+
 def preflight(config, online):
 	"""List of Check objects. Only level "block" stops Install."""
 	checks = [_check_network(online), _check_memory(), _check_secure_boot()]
@@ -422,6 +435,7 @@ def preflight(config, online):
 		checks.append(_check_image())
 	if config.disk:
 		checks.append(_check_disk(config.disk))
+		checks.append(_check_auto_fit(config))
 	return [check for check in checks if check]
 
 
