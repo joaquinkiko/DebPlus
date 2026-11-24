@@ -7,7 +7,7 @@ SCRIPT_DIRECTORY="$(dirname "$(readlink -f "$0")")"
 
 apt-get install -y --no-install-recommends \
 	labwc seatd xwayland foot fuzzel fonts-recommended \
-	pipewire-audio wireplumber pavucontrol \
+	pipewire-audio pipewire-pulse wireplumber pavucontrol \
 	grim slurp wl-clipboard waybar \
 	brightnessctl playerctl \
 	xdg-user-dirs xdg-utils \

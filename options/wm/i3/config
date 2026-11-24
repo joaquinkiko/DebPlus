@@ -48,7 +48,6 @@ bindsym $mod+$smod+a exec synaptic-pkexec
 floating_modifier $mod normal
 bindsym $mod+$smod+q kill
 bindsym $mod+$smod+l exec $lock
-bindsym $mod+$smod+x exec oblogout
 bindsym $mod+$smod+e exec i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really want to exit i3? This will end your X session.' -B 'Yes, exit i3' 'i3-msg exit'
 bindsym $mod+$smod+c reload
 bindsym $mod+$smod+r restart

@@ -8,8 +8,6 @@ BACKPORTS_SUITE="trixie-backports"
 USER_NAME="$(awk -F: '$3>=1000 && $3<65534 {print $1; exit}' /etc/passwd)"
 USER_HOME="/home/$USER_NAME"
 
-echo "shared/default-x-display-manager select lightdm" | debconf-set-selections
-
 if ! grep -q "$BACKPORTS_SUITE" /etc/apt/sources.list.d/debian.sources; then
 	cat >> /etc/apt/sources.list.d/debian.sources << BACKPORTS
 
@@ -31,7 +29,7 @@ apt-get install -y --no-install-recommends \
 	waybar wofi kitty mako-notifier grim slurp wl-clipboard fonts-dejavu-core \
 	swaybg xdg-desktop-portal-gtk \
 	libpam-systemd policykit-1 \
-	lightdm lightdm-gtk-greeter \
+	greetd seatd tuigreet \
 	network-manager-gnome \
 	pipewire pipewire-pulse wireplumber pavucontrol brightnessctl playerctl \
 	mousepad mpv nemo synaptic lxtask \
@@ -47,6 +45,7 @@ KEYBOARD_LAYOUT="${XKBLAYOUT:-us}"
 
 install -Dm644 "$SCRIPT_DIRECTORY/hyprland.png" /usr/share/backgrounds/wallpaper.png
 install -Dm644 "$SCRIPT_DIRECTORY/waybar.jsonc" /etc/xdg/waybar/config.jsonc
+install -Dm644 "$SCRIPT_DIRECTORY/config.toml" /etc/greetd/config.toml
 install -Dm644 "$SCRIPT_DIRECTORY/mimeapps.list" /etc/xdg/mimeapps.list
 install -Dm644 "$SCRIPT_DIRECTORY/user-dirs.defaults" /etc/xdg/user-dirs.defaults
 install -Dm644 "$SCRIPT_DIRECTORY/gtk-settings.ini" /etc/xdg/gtk-3.0/settings.ini
@@ -62,6 +61,13 @@ sed -i "s/kb_layout .*/kb_layout  = \"$KEYBOARD_LAYOUT\",/" "$USER_HOME/.config/
 update-alternatives --install /usr/bin/x-terminal-emulator x-terminal-emulator /usr/bin/kitty 50
 update-alternatives --set x-terminal-emulator /usr/bin/kitty
 
-systemctl enable lightdm.service
-runuser -u "$USER_NAME" -- xdg-user-dirs-update
+systemctl enable seatd
+systemctl disable getty@tty1.service
+systemctl enable greetd.service
+
+getent group seat >/dev/null || groupadd --system seat
+for USER_NAME in $(awk -F: '$3>=1000 && $3<65534 {print $1}' /etc/passwd); do
+	usermod -aG seat "$USER_NAME"
+	runuser -u "$USER_NAME" -- xdg-user-dirs-update
+done
 apt-get clean

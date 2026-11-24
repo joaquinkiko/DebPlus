@@ -14,10 +14,4 @@ printf 'Package: *\nPin: origin apt.justaguy.dev\nPin-Priority: 100\n' > /etc/ap
 apt-get update
 apt-get install -y cosmic-desktop
 
-# Make cosmic-greeter the display manager, in case its package didn't claim the slot
-GREETER_UNIT="$(dpkg -L cosmic-greeter | grep -m1 -E '/systemd/system/.*\.service$' || true)"
-if [ -n "$GREETER_UNIT" ]; then
-	ln -sf "$GREETER_UNIT" /etc/systemd/system/display-manager.service
-fi
-
 apt-get clean

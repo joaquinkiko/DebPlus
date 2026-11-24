@@ -6,13 +6,11 @@ export DEBIAN_FRONTEND=noninteractive
 SCRIPT_DIRECTORY="$(dirname "$(readlink -f "$0")")"
 USER_NAME="$(awk -F: '$3>=1000 && $3<65534 {print $1; exit}' /etc/passwd)"
 
-echo "shared/default-x-display-manager select lightdm" | debconf-set-selections
-
 apt-get install -y --no-install-recommends \
 	sway swaybg swayidle swaylock xwayland waybar wofi kitty mako-notifier grim slurp \
 	xdg-desktop-portal-wlr xdg-desktop-portal-gtk autotiling \
 	libpam-systemd policykit-1 lxpolkit \
-	lightdm lightdm-gtk-greeter firefox-esr \
+	greetd seatd tuigreet \
 	network-manager-gnome \
 	pipewire pipewire-pulse wireplumber pavucontrol brightnessctl playerctl \
 	mousepad mpv nemo synaptic lxtask \
@@ -30,6 +28,7 @@ install -Dm644 "$SCRIPT_DIRECTORY/config" /etc/sway/config
 sed -i "s/^input type:keyboard {/&\n    xkb_layout $KEYBOARD_LAYOUT/" /etc/sway/config
 install -Dm644 "$SCRIPT_DIRECTORY/sway.png" /usr/share/backgrounds/wallpaper.png
 install -Dm644 "$SCRIPT_DIRECTORY/waybar.jsonc" /etc/xdg/waybar/config.jsonc
+install -Dm644 "$SCRIPT_DIRECTORY/config.toml" /etc/greetd/config.toml
 install -Dm644 "$SCRIPT_DIRECTORY/mimeapps.list" /etc/xdg/mimeapps.list
 install -Dm644 "$SCRIPT_DIRECTORY/user-dirs.defaults" /etc/xdg/user-dirs.defaults
 install -Dm644 "$SCRIPT_DIRECTORY/gtk-settings.ini" /etc/xdg/gtk-3.0/settings.ini
@@ -41,6 +40,13 @@ update-alternatives --install /usr/bin/x-terminal-emulator x-terminal-emulator /
 update-alternatives --set x-terminal-emulator /usr/bin/kitty
 update-alternatives --set x-www-browser /usr/bin/firefox-esr
 
-systemctl enable lightdm.service
-runuser -u "$USER_NAME" -- xdg-user-dirs-update
+systemctl enable seatd
+systemctl disable getty@tty1.service
+systemctl enable greetd.service
+
+getent group seat >/dev/null || groupadd --system seat
+for USER_NAME in $(awk -F: '$3>=1000 && $3<65534 {print $1}' /etc/passwd); do
+	usermod -aG seat "$USER_NAME"
+	runuser -u "$USER_NAME" -- xdg-user-dirs-update
+done
 apt-get clean

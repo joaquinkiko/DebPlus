@@ -19,7 +19,7 @@ apt-get install -y --no-install-recommends \
 apt-get install -y --no-install-recommends \
 	xdg-desktop-portal gvfs gvfs-backends udisks2 imv zathura file-roller \
 	gnome-keyring libpam-gnome-keyring seahorse \
-	xserver-xorg-input-libinput x11-xserver-utils arandr oblogout \
+	xserver-xorg-input-libinput x11-xserver-utils arandr \
 	redshift-gtk geoclue-2.0
 
 install -Dm644 "$SCRIPT_DIRECTORY/config" /etc/i3/config

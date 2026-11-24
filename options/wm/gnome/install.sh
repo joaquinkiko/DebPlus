@@ -18,8 +18,6 @@ echo "shared/default-x-display-manager select gdm3" | debconf-set-selections
 
 apt-get install -y --no-install-recommends gnome-core gdm3 pkexec \
 	gnome-terminal nautilus gnome-text-editor gnome-system-monitor \
-	gnome-software showtime xdg-desktop-portal-gnome
-purge_installed gnome-initial-setup gnome-user-docs gnome-maps gnome-weather \
-	gnome-contacts gnome-clocks gnome-music gnome-calendar epiphany-browser
+	gnome-software totem xdg-desktop-portal-gnome
 apt-get autoremove --purge -y
 apt-get clean
