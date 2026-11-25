@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-only. See COPYING and NOTICE.
 
 import functools
+import gzip
 import json
 import math
 import os
@@ -405,12 +406,42 @@ def _check_clock():
 	             "cause package download errors.", "clock")
 
 
-def _check_image():
-	if target_image() and target_repo():
+@functools.lru_cache(maxsize=1)
+def repo_packages():
+	"""Package names in the live medium's local repo, or empty set if unreadable."""
+	try:
+		with gzip.open(os.path.join(TARGET_REPO, "Packages.gz"), "rt") as index_file:
+			return frozenset(line.split(":", 1)[1].strip() for line in index_file
+			                 if line.startswith("Package:"))
+	except OSError:
+		return frozenset()
+
+
+def packages_to_install(config) -> list:
+	"""Packages beyond the base image: bootloader, headers, chosen options, shipped extras."""
+	wanted = set(boot_packages(config.boot_mode))
+	wanted |= {package for package, flag in optional_rows() if getattr(config, flag)}
+	wanted |= set(header_packages())
+	for entry in config.selected_packages():
+		if not needs_network(entry):  # shipped on the ISO, so install_extras skips it
+			wanted |= set(entry.split())
+	return sorted(wanted)
+
+
+def _check_image(config, online):
+	if not (target_image() and target_repo()):
+		return Check("block", "Install image",
+		             "The base system image or package repo is missing from the install "
+		             "medium. Download the ISO again.")
+	if online:
 		return Check("ok", "Install image", "found")
+	missing = sorted(set(packages_to_install(config)) - repo_packages())
+	if not missing:
+		return Check("ok", "Install image", "found, offline packages complete")
+	more = " and more" if len(missing) > 5 else ""
 	return Check("block", "Install image",
-	             "The base system image or package repo is missing from the install "
-	             "medium. Download the ISO again.")
+	             f"The install medium lacks packages needed offline: {', '.join(missing[:5])}{more}. "
+	             "Download the ISO again.")
 
 
 def _check_auto_fit(config):
@@ -432,7 +463,7 @@ def preflight(config, online):
 	if online:  # an unsynced clock only matters for downloads
 		checks.append(_check_clock())
 	if not config.fake_mode:
-		checks.append(_check_image())
+		checks.append(_check_image(config, online))
 	if config.disk:
 		checks.append(_check_disk(config.disk))
 		checks.append(_check_auto_fit(config))
@@ -646,7 +677,13 @@ def wifi_connect(ssid, password, security=""):
 		"[wifi]", f"ssid={ssid}", "mode=infrastructure", "",
 	]
 	if password:
-		key_lines = ["key-mgmt=sae", "pmf=3"] if "WPA3" in security.upper() else ["key-mgmt=wpa-psk"]
+		security_upper = security.upper()
+		if "WPA3" in security_upper and "WPA2" in security_upper:
+			key_lines = ["key-mgmt=wpa-psk,sae", "pmf=1"]  # WPA2/WPA3 transition
+		elif "WPA3" in security_upper:
+			key_lines = ["key-mgmt=sae", "pmf=3"]
+		else:
+			key_lines = ["key-mgmt=wpa-psk"]
 		lines += ["[wifi-security]", *key_lines, f"psk={password}", ""]
 
 	fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

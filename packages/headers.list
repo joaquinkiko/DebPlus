@@ -1,2 +1,2 @@
-# Kernel headers, always installed so DKMS modules can build. Skipped when Backports kernel is ticked (the backports step installs matching headers). One per line.
+# Kernel headers for the base kernel, always installed so DKMS modules build before any backports kernel. One per line.
 linux-headers-amd64

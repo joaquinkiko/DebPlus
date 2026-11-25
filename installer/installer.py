@@ -649,18 +649,6 @@ def write_apt_sources(config: Config):
 
 # ── Base system ────────────────────────────────────────────────────────
 
-def packages_to_install(config: Config) -> list:
-	"""Packages beyond the base image: bootloader, chosen options, shipped extras."""
-	wanted = set(utils.boot_packages(config.boot_mode))
-	wanted |= {package for package, flag in utils.optional_rows() if getattr(config, flag)}
-	if not config.backports_kernel:  # backports path installs matching headers later
-		wanted |= set(utils.header_packages())
-	for entry in config.selected_packages():
-		if not utils.needs_network(entry):  # shipped on the ISO, so install_extras skips it
-			wanted |= set(entry.split())
-	return sorted(wanted)
-
-
 def _unmount_all():
 	"""Release chroot and secondary mounts so a retried extraction starts clean."""
 	for sub in ("sys/firmware/efi/efivars", "sys", "proc", "dev/pts", "dev", "boot/efi", "boot", "home"):
@@ -705,7 +693,7 @@ def _install_from_local_repo(packages):
 
 def install_packages(config: Config):
 	"""Install the packages this install needs, then bring the system up to date if online."""
-	packages = packages_to_install(config)
+	packages = utils.packages_to_install(config)
 	if config.boot_mode == BOOT_BIOS:
 		# Empty install_devices keeps grub-pc from prompting. The bootloader stage installs GRUB.
 		_chroot(["sh", "-c", "echo 'grub-pc grub-pc/install_devices string' | debconf-set-selections"])

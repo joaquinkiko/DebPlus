@@ -179,9 +179,13 @@ def _on_format(_box, state, user_data):
 	app.config.layout[role]["format"] = state
 
 
-def _on_swappiness(_edit, new_text, app):
-	if new_text.isdigit() and int(new_text) <= 100:
+def _on_swappiness(_edit, new_text, user_data):
+	app, error_text = user_data
+	if new_text.isascii() and new_text.isdigit() and int(new_text) <= 200:
 		app.config.swappiness = int(new_text)
+		error_text.set_text("")
+	else:
+		error_text.set_text(("error", f"  Enter 0-200. Keeping {app.config.swappiness}."))
 
 
 def _on_multiarch(_box, state, app):
@@ -824,13 +828,13 @@ def hostname(app):
 
 	def accept(_=None):
 		value = edit.edit_text
-		if re.match(r"^[a-zA-Z][a-zA-Z0-9-]*$", value):
+		if re.fullmatch(r"[a-z]([a-z0-9-]{0,61}[a-z0-9])?", value):
 			_set(app, "hostname", value)
 		else:
-			_show_error(error_text, "Invalid hostname")
+			_show_error(error_text, "Lowercase letters, digits, hyphens. 63 max, no trailing hyphen.")
 
 	items = [
-		urwid.Text(("label", "  System identifier. Must start with a letter.")),
+		urwid.Text(("label", "  System identifier. Lowercase, must start with a letter.")),
 		urwid.Divider(),
 		edit,
 		error_text,
@@ -1286,10 +1290,12 @@ def advanced(app):
 		"Default policies and allow rules for common services.")
 	items += _described(_action("  Git", lambda _: git(app)),
 		"Name, email, default branch, editor, and pull behavior.")
-	swappiness_edit = urwid.Edit("  Swappiness (0-100): ", str(config.swappiness))
-	urwid.connect_signal(swappiness_edit, "change", _on_swappiness, app)
+	swappiness_edit = urwid.Edit("  Swappiness (0-200): ", str(config.swappiness))
+	swappiness_error = urwid.Text("")
+	urwid.connect_signal(swappiness_edit, "change", _on_swappiness, (app, swappiness_error))
 	items += [
 		swappiness_edit,
+		swappiness_error,
 		urwid.Text(("label", "      Lower keeps more in RAM. 10 suits gaming, 60 is the default.")),
 	]
 	_open(app, "Advanced", _with_back(app, items),
